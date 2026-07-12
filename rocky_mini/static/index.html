@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rocky Mini</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="glyph" aria-hidden="true">◇</span>
+      <h1>Rocky <span class="dim">Mini</span></h1>
+    </div>
+    <div class="chips" id="chips">
+      <span class="chip" id="chip-model" title="active model">model: …</span>
+      <span class="chip" id="chip-words">knows 0 words</span>
+      <span class="chip" id="chip-stage">stage 0</span>
+      <span class="chip chip-sleep" id="chip-sleep" hidden>sleep-watch</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- Sim chat -->
+    <section class="card chat-card" aria-label="Sim chat">
+      <h2>Talk to Rocky <span class="badge">sim</span></h2>
+      <div id="transcript" class="transcript" aria-live="polite"></div>
+      <form id="chat-form" class="chat-form">
+        <input id="chat-input" name="text" autocomplete="off"
+               placeholder="Teach Rocky something, or ask a question…" />
+        <button id="chat-send" type="submit">Send</button>
+        <button id="barge-btn" type="button" class="ghost" title="Interrupt Rocky">Barge-in</button>
+      </form>
+    </section>
+
+    <!-- Metrics -->
+    <section class="card" aria-label="Turn metrics">
+      <h2>Turn metrics</h2>
+      <div class="stat-row">
+        <div class="stat"><span class="stat-label">Ack</span><span class="stat-val" id="m-ack">—</span><span class="stat-unit">ms</span></div>
+        <div class="stat"><span class="stat-label">First audio</span><span class="stat-val" id="m-ttfa">—</span><span class="stat-unit">s</span></div>
+        <div class="stat"><span class="stat-label">Total</span><span class="stat-val" id="m-total">—</span><span class="stat-unit">s</span></div>
+      </div>
+      <div class="stat-row">
+        <div class="stat"><span class="stat-label">Prompt tok</span><span class="stat-val" id="m-prompt">—</span></div>
+        <div class="stat"><span class="stat-label">Gen tok</span><span class="stat-val" id="m-eval">—</span></div>
+        <div class="stat"><span class="stat-label">Tools</span><span class="stat-val" id="m-tools">—</span></div>
+      </div>
+      <div class="meter" aria-label="latency vs 2.5s budget">
+        <div class="meter-head">
+          <span>time to first audio</span>
+          <span id="meter-status" class="meter-status">—</span>
+        </div>
+        <div class="meter-track">
+          <div class="meter-fill" id="meter-fill" style="width:0%"></div>
+          <div class="meter-budget" title="2.5s p50 budget"></div>
+        </div>
+        <div class="meter-scale"><span>0s</span><span>budget 2.5s</span><span>5s</span></div>
+      </div>
+    </section>
+
+    <!-- Facts -->
+    <section class="card facts-card" aria-label="What Rocky remembers">
+      <h2>What Rocky remembers</h2>
+      <table class="facts" id="facts-table">
+        <thead>
+          <tr><th>Fact</th><th>Category</th><th>Confidence</th><th>Heard</th><th></th></tr>
+        </thead>
+        <tbody id="facts-body">
+          <tr class="empty-row"><td colspan="5">Nothing yet. Teach Rocky something.</td></tr>
+        </tbody>
+      </table>
+      <a id="export-btn" class="ghost btn-link" href="/api/export">Export memory (.zip)</a>
+    </section>
+
+    <!-- Emotes + settings -->
+    <section class="card" aria-label="Emotes and settings">
+      <h2>Emotes</h2>
+      <div class="emote-grid">
+        <button class="emote-btn" data-emote="jazz_hands">jazz hands</button>
+        <button class="emote-btn" data-emote="understand">understand</button>
+        <button class="emote-btn" data-emote="thinking">thinking</button>
+        <button class="emote-btn" data-emote="sleepy">sleepy</button>
+      </div>
+
+      <h2 class="mt">Settings</h2>
+      <label class="field">
+        <span>Model</span>
+        <select id="model-select">
+          <option value="qwen2.5:7b-instruct">qwen2.5:7b-instruct (stock)</option>
+          <option value="rocky:latest">rocky:latest (LoRA)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Brain URL</span>
+        <input id="url-input" placeholder="http://localhost:11434/v1" />
+      </label>
+      <button id="settings-save" class="ghost">Save settings</button>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>Fully local. No paid APIs. Sim brain shown; real brain is Ollama Qwen2.5 + Rocky LoRA.</span>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

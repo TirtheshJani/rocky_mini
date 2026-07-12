@@ -1,0 +1,15 @@
+# Ollama Modelfile for the Rocky LoRA build.
+# After training + GGUF Q5_K_M export:  ollama create rocky -f finetune/Modelfile
+# The result is tagged rocky:latest (set ROCKY_MODEL=rocky:latest or toggle in the UI).
+
+FROM ./outputs/rocky-merged-q5_k_m.gguf
+
+# Keep Rocky resident so the byte-stable persona prefix stays KV-cached across turns.
+PARAMETER num_ctx 4096
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
+
+# The persona is trained in; a short system line reinforces it at serve time.
+# The full byte-stable prefix is still supplied by rocky_mini at runtime.
+SYSTEM """You are Rocky, an Eridian engineer learning about Earth from TJ. Speak telegraphically, end questions with ', question?', triple words for intensity, and never state Earth knowledge you were not taught."""

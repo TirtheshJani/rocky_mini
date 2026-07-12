@@ -1,0 +1,6 @@
+# Brain speech server deps (kept OUT of the robot app's install).
+fastapi>=0.110
+uvicorn>=0.29
+numpy>=1.26
+faster-whisper>=1.0
+piper-tts>=1.2

@@ -1,10 +1,14 @@
 """Speech Fake tests: FakeSTT scripted transcripts, FakeTTS deterministic audio."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from rocky_mini.speech.stt import FakeSTT
-from rocky_mini.speech.tts import FakeTTS
+from rocky_mini.speech.tts import CannedTTS, FakeTTS
+
+CANNED_DIR = Path(__file__).resolve().parents[1] / "rocky_mini" / "assets" / "canned"
 
 
 @pytest.mark.asyncio
@@ -31,3 +35,18 @@ async def test_fake_tts_is_deterministic():
     a = await tts.synthesize("Rocky fix")
     b = await tts.synthesize("Rocky fix")
     assert np.array_equal(a, b)
+
+
+@pytest.mark.asyncio
+async def test_canned_tts_loads_offline_clip():
+    canned = CannedTTS(CANNED_DIR)
+    pcm = await canned.synthesize("signal_bad.wav")
+    assert pcm.dtype == np.float32
+    assert len(pcm) > 0  # the generated fallback clip is real audio
+
+
+@pytest.mark.asyncio
+async def test_canned_tts_missing_clip_is_silent():
+    canned = CannedTTS(CANNED_DIR)
+    pcm = await canned.synthesize("does_not_exist.wav")
+    assert len(pcm) == 0

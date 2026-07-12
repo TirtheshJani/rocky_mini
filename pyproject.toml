@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rocky_mini"
+version = "0.1.0"
+description = "Rocky (Project Hail Mary) conversation app for Reachy Mini: a curious Eridian who learns and remembers, fully local zero-API-cost stack."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "TJ" }]
+
+# Core deps are the ones needed to run the sim/test path with Fakes.
+# The robot SDK, real LLM/STT/TTS clients, and VAD backends are optional
+# extras so the software core installs and tests green without hardware,
+# Ollama, or a GPU. See README "Install" for the full physical-robot setup.
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+
+[project.optional-dependencies]
+# Physical robot / SDK integration.
+robot = ["reachy-mini"]
+# Local LLM client (OpenAI-compatible, pointed at Ollama) + HTTP.
+llm = ["openai>=1.30", "httpx>=0.27"]
+# Voice-activity detection for open-mic (Silero via onnxruntime, no torch).
+vad = ["onnxruntime>=1.17", "silero-vad>=5.1"]
+# Developer / local-audio tooling.
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-mock>=3.12", "sounddevice>=0.4.6"]
+
+# Dashboard entry point: pip install -e . makes the app dashboard-visible.
+[project.entry-points."reachy_mini_apps"]
+rocky_mini = "rocky_mini.main:RockyMiniApp"
+
+[project.scripts]
+rocky-mini = "rocky_mini.main:cli"
+
+[tool.setuptools.packages.find]
+include = ["rocky_mini*"]
+
+[tool.setuptools.package-data]
+rocky_mini = ["static/*", "assets/canned/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

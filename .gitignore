@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Rocky runtime state (lives in ~/.rocky_mini, but ignore any local copies)
+.rocky_mini/
+*.jsonl.bak
+
+# Secrets
+.env
+!.env.example
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Playwright / test scratch
+test-results/
+playwright-report/
+*.png
+!rocky_mini/static/*.png
+
+# Model / audio artifacts (large)
+finetune/data/*.jsonl.gz
+finetune/outputs/
+*.gguf
+data/pickles/

@@ -1,0 +1,37 @@
+# agents.local.md - rocky_mini environment and session context
+
+## Robot
+
+- Model: Reachy Mini **Wireless** (Raspberry Pi CM4, 4 GB).
+- Role at runtime: thin client. VAD + motion + audio mixing only. No local inference.
+
+## Brain server (TJ's PC)
+
+- GPU: RTX 4080, 16 GB VRAM.
+- Ollama serves `qwen2.5:7b-instruct-q5_K_M` (~5.5 GB) with `keep_alive=-1`.
+- FastAPI speech service exposes `/stt` (faster-whisper) and `/tts` (Piper).
+- In sim everything is localhost; on hardware the robot reaches the PC over LAN.
+
+## Dev environment (as built)
+
+- Windows 11, Python 3.13. Sim-first.
+- Installed and used by the tested core: numpy, scipy, fastapi, uvicorn, pydantic,
+  pydantic-settings, pytest, pytest-asyncio, pytest-mock.
+- Optional (documented, not required for the sim/test path): reachy-mini SDK, ollama,
+  openai client, onnxruntime + silero-vad, sounddevice.
+
+## Deviations from plan (honest log)
+
+- The plan calls for scaffolding via `reachy-mini-app-assistant create`. Neither `uv`
+  nor the reachy SDK was installed in this environment and there is no reference clone,
+  so the package tree was hand-created with the same layout the assistant produces
+  (entry point `reachy_mini_apps`, `pyproject.toml`, `static/`). Logged in decisions.md.
+- Ollama / faster-whisper / Piper / MuJoCo / WSL2+Unsloth are not present here, so
+  those paths are built behind Protocols and exercised with Fakes. Real-client run
+  instructions are in README.md and server/README.md; finetune/ is scaffolded but not
+  executed (no GPU here).
+
+## Footgun reminders
+
+See CLAUDE.md. Most load-bearing: one set_target owner, one push_audio_sample owner,
+byte-stable persona, memory in ~/.rocky_mini, no paid APIs, no face tracking.

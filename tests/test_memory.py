@@ -110,3 +110,25 @@ def test_add_and_get_session(tmp_path):
     last = store.last_session()
     assert last.summary == "taught taco"
     assert last.follow_ups == ["is burrito also sandwich?"]
+
+
+def test_import_clears_stale_logs(tmp_path):
+    # src has facts but no sessions; dst has a session that must be wiped on import.
+    src = MemoryStore(tmp_path / "src", now=make_clock())
+    src.remember_fact("food", "taco is food")
+    zpath = src.export_zip(tmp_path / "snap.zip")
+
+    dst = MemoryStore(tmp_path / "dst", now=make_clock())
+    dst.add_session("old session that should vanish")
+    dst.import_zip(zpath)
+    assert dst.last_session() is None  # stale sessions.jsonl removed
+    assert [f.text for f in dst.active_facts()] == ["taco is food"]
+
+
+def test_active_facts_are_chronological_beyond_ten(tmp_path):
+    store = MemoryStore(tmp_path, now=make_clock())
+    for i in range(12):
+        store.remember_fact("n", f"fact {i}")
+    ids = [f.id for f in store.active_facts()]
+    # Insertion order, not lexical id order (f10 must not sort before f2).
+    assert ids == [f"f{i}" for i in range(1, 13)]

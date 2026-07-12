@@ -224,11 +224,18 @@ class MemoryStore:
         return path
 
     def import_zip(self, path: str | Path) -> None:
-        """Replace this store's logs with an exported snapshot, then reload."""
+        """Replace this store's logs with an exported snapshot, then reload.
+
+        Clears all three logs first so a log the snapshot omits (e.g. no sessions)
+        does not leave stale records behind on re-import.
+        """
         path = Path(path)
         with zipfile.ZipFile(path, "r") as zf:
+            names = set(zf.namelist())
             for name in _LOG_FILES:
-                if name in zf.namelist():
-                    data = zf.read(name)
-                    (self.base_dir / name).write_bytes(data)
+                target = self.base_dir / name
+                if name in names:
+                    target.write_bytes(zf.read(name))
+                elif target.exists():
+                    target.unlink()
         self.load()

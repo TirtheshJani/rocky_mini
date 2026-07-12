@@ -9,7 +9,6 @@ SimResponder) so it runs with no robot, no Ollama, and no GPU.
 from __future__ import annotations
 
 import asyncio
-import io
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -175,6 +174,8 @@ def create_app(state: AppState | None = None) -> FastAPI:
 
     @app.get("/api/facts")
     async def get_facts() -> dict:
+        # active_facts() preserves first-insertion (chronological) order. Do NOT sort by
+        # id string: ids like f1..f10 sort lexically, putting f10 before f2.
         facts = [
             {
                 "id": f.id,
@@ -183,7 +184,7 @@ def create_app(state: AppState | None = None) -> FastAPI:
                 "confidence": f.confidence,
                 "heard_count": f.heard_count,
             }
-            for f in sorted(state.memory.active_facts(), key=lambda x: x.id)
+            for f in state.memory.active_facts()
         ]
         return {"facts": facts}
 
@@ -207,6 +208,8 @@ def create_app(state: AppState | None = None) -> FastAPI:
     async def chat(body: ChatIn) -> dict:
         result = await state.loop.handle_text_turn(body.text)
         state.mixer.render()  # consume queued audio (sim playout)
+        if hasattr(state.mixer.io, "pushed"):
+            state.mixer.io.pushed.clear()  # avoid unbounded growth in the sim FakeAudioIO
         state.last_metrics = result.metrics
         spoken = " ".join(c.text for c in result.chunks if c.text)
         payload = {
@@ -278,7 +281,3 @@ def _sse(data: dict) -> str:
     import json
 
     return f"data: {json.dumps(data)}\n\n"
-
-
-def _load_bytes(upload: io.BytesIO) -> bytes:  # pragma: no cover - reserved for import UI
-    return upload.getvalue()

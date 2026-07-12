@@ -197,7 +197,14 @@ class ConversationLoop:
         )
 
     def barge_in(self) -> None:
-        """Interrupt current speech: bump generation, flush the Mixer, cancel the task."""
+        """Interrupt current speech.
+
+        The primary mechanism is the generation bump + Mixer flush: the Mixer drops any
+        queued voice tagged with the now-stale generation, so speech stops immediately.
+        The task cancel is a best-effort guard for when a turn is driven as a background
+        task (set _current_task before awaiting it); in the synchronous sim path there is
+        no such task and cancel is a safe no-op.
+        """
         self.generation += 1
         self.mixer.set_generation(self.generation)
         self._fire_chord("interrupted")

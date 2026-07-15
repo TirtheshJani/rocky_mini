@@ -81,18 +81,50 @@ class RockyMiniApp(_BaseApp):
 
     def _run_hardware(self, mini: object, stop_event: threading.Event) -> None:
         """Supervise the hardware threads until the daemon asks us to stop."""
+        import asyncio
+
         from .audio.chords import ChordBank
+        from .audio.input import AudioInThread, SpeechSegment
         from .audio.io import ReachyMediaIO, make_audio_io
+        from .audio.vad import FakeVAD, SileroVAD
+        from .turn import SPEAKING
 
         if self.settings.audio_backend == "reachy":
             io = ReachyMediaIO(mini)  # raises if the SDK surface is missing
+            vad = SileroVAD(rate=self.settings.sample_rate_in)
         else:  # dev against a sim daemon: fake/sounddevice audio, real motion
             io = make_audio_io(self.settings.audio_backend)
+            vad = FakeVAD()
         out_rate = getattr(io, "output_sample_rate", self.settings.sample_rate_out)
         self.state.mixer.io = io
         self.state.mixer.sample_rate = out_rate
         self.state.loop.chords = ChordBank(sample_rate=out_rate)
 
+        # The asyncio loop is its own latency domain (plan.md): voice turns are
+        # submitted onto it from AudioInThread without blocking the mic reads.
+        aio = asyncio.new_event_loop()
+        aio_thread = threading.Thread(target=aio.run_forever, daemon=True, name="ConversationLoop")
+
+        def on_speech(seg: SpeechSegment) -> None:
+            # t_start = last voiced frame, so the 0.6 s hangover counts (footgun 7).
+            asyncio.run_coroutine_threadsafe(
+                self.state.loop.handle_voice_turn(
+                    seg.pcm, seg.sample_rate, t_start=seg.t_last_voiced
+                ),
+                aio,
+            )
+
+        audio_in = AudioInThread(
+            io=io,
+            vad=vad,
+            motion=self.state.motion,
+            on_speech=on_speech,
+            is_speaking=lambda: self.state.loop.state == SPEAKING or self.state.mixer.pending(),
+            on_barge_in=self.state.loop.barge_in,
+            half_duplex=self.settings.half_duplex,
+            rate=self.settings.sample_rate_in,
+            hangover_s=self.settings.vad_hangover_s,
+        )
         motion_thread = threading.Thread(
             target=self.state.motion.run, args=(mini, stop_event),
             daemon=True, name="MotionThread",
@@ -101,12 +133,23 @@ class RockyMiniApp(_BaseApp):
             target=self._mixer_pump, args=(stop_event,),
             daemon=True, name="MixerPump",
         )
+        audio_in_thread = threading.Thread(
+            target=audio_in.run, args=(stop_event,),
+            daemon=True, name="AudioInThread",
+        )
+        aio_thread.start()
         motion_thread.start()
         pump_thread.start()
+        audio_in_thread.start()
         try:
             stop_event.wait()
         finally:
+            # Ordered shutdown (plan.md): audio in -> asyncio -> mixer drain ->
+            # motion neutral ramp -> close the device.
             stop_event.set()
+            audio_in_thread.join(timeout=1.0)
+            aio.call_soon_threadsafe(aio.stop)
+            aio_thread.join(timeout=2.0)
             pump_thread.join(timeout=1.0)
             self.state.mixer.render()  # drain anything still queued
             motion_thread.join(timeout=2.0)  # includes the 0.6 s neutral ramp

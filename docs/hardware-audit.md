@@ -303,7 +303,40 @@ ticks > 15 ms late (interval > 25 ms): 0
 ```
 
 The mean is 98.79 Hz, not 100: the sleep-based loop overshoots by ~0.1 ms per tick.
-Honest number, kept as is; the CM4 measurement in bring-up.md is the one that matters.
+Honest number, kept as is; the CM4 measurement below is the one that matters.
+
+### 1a addendum: the same 60 s on the CM4 (PENDING, robot not yet booted)
+
+The harness is committed as `scripts/gate_jitter.py` with run instructions in its
+docstring. The moment the robot boots: SSH in (dev loop 2), editable-install the repo,
+run `ROCKY_AUDIO_BACKEND=fake python scripts/gate_jitter.py`, and paste the output
+here next to the PC baseline above. This runs BEFORE building on the 100 Hz
+assumption; if the CM4 cannot hold the loop, the recorded fallback is 60 Hz (the
+official Conversation App's constant, motion still lifelike). Phase 1b's VAD +
+mic load lands on the same four cores, so this baseline is measured motion-only,
+matching the PC run.
+
+## Phase 1b verification (voice-in thread, sim daemon)
+
+G1 is closed: `audio/input.py` (ring buffer, VadGate with the 0.6 s hangover, speech
+segments anchored to the last voiced frame per footgun 7, ~10 Hz DoA poll with the
+hardware-flag AND VAD-state gate) and `audio/vad.py` (VAD Protocol; FakeVAD; SileroVAD
+running the vendored ONNX model with onnxruntime, no torch, decisions.md #11). All
+gate logic is clock-injected and tested against FakeAudioIO; only the raw mic read
+touches hardware, and that is the 1a-tested ReachyMediaIO.
+
+Live path proof against the mockup daemon (test input injected into FakeAudioIO;
+everything downstream is the real path: AudioInThread -> MovementManager ->
+set_target -> daemon):
+
+```
+daemon head yaw before DoA: +1.92 deg      (breathing sweep)
+daemon head yaw after  DoA: +18.88 deg     (DoA 25 deg: 0.6*25 head + 0.2*25 body, world frame)
+motion.doa_deg = 25.0
+clean exit after stop_event
+```
+
+Suite: 164 tests pass, both with the SDK installed and with it import-blocked.
 
 ## Evidence appendix (live probe output, mockup daemon, SDK 1.9.0)
 

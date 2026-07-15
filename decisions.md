@@ -63,3 +63,12 @@ Format: date | decision | reasoning | reversal condition.
     Rejected as cosmetic: flat layout, wildcard package-data, scaffold landing page,
     3.10 floor. HF Space README front matter is adopted at publish time. Reversal:
     re-run the diff on SDK upgrade (same as the audit itself).
+
+11. **Silero VAD is vendored as an ONNX file, not a package dependency.** The
+    `silero-vad` PyPI package (v6+) requires torch + torchaudio, which pulls the CUDA
+    stack: gigabytes of wheels on a 4 GB CM4 that plan.md explicitly avoids ("Silero
+    via onnxruntime, no torch"). The 2.3 MB `silero_vad.onnx` (MIT) is vendored under
+    `rocky_mini/assets/models/` with provenance in its README, and `audio/vad.py` runs
+    it with onnxruntime pinned to single-threaded sessions to protect the motion loop.
+    Reversal: if Silero ships a torch-free package again, or the app moves off the CM4,
+    depend on the package instead.

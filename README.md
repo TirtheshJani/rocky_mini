@@ -10,7 +10,7 @@ as the LAN brain server. The robot is a thin client. Development is **sim-first 
 
 ## What this is (and honest scope)
 
-The software core is built and **tested green (126 tests)**, and the app **runs and is
+The software core is built and **tested green (164 tests)**, and the app **runs and is
 driven end-to-end in sim** (a real browser Playwright pass over the settings UI). External
 services sit behind Protocols with Fakes, so the whole pipeline runs with **no robot, no
 Ollama, and no GPU**:
@@ -49,7 +49,7 @@ growth stages) are in `rocky_mini/brain/`, `rocky_mini/memory/`, and `rocky_mini
 pip install -e .           # core deps only: numpy, scipy, fastapi, uvicorn, pydantic
 python -m rocky_mini.main --sim --host 127.0.0.1 --port 8042
 # open http://127.0.0.1:8042  -> teach Rocky, watch the fact table + metrics
-pytest -q                  # 126 tests
+pytest -q                  # 164 tests
 ```
 
 The settings UI: sim chat (drives a real conversation turn), fact table (confirm/delete),

@@ -153,20 +153,30 @@ class EmoteIn(BaseModel):
     name: str
 
 
-def create_app(state: AppState | None = None) -> FastAPI:
+def create_app(state: AppState | None = None, app: FastAPI | None = None) -> FastAPI:
+    """Build the settings-UI FastAPI app, or attach the API routes to an existing one.
+
+    When the SDK's ReachyMiniApp base class owns the webserver (custom_app_url set),
+    it already serves "/" and mounts static/; pass its settings_app here and only the
+    /api routes are added (audit F3/D4). With app=None (sim CLI, tests) a standalone
+    app is built, unchanged behaviour.
+    """
     state = state or AppState.build()
-    app = FastAPI(title="Rocky Mini", version="0.1.0")
+    attach_only = app is not None
+    if app is None:
+        app = FastAPI(title="Rocky Mini", version="0.1.0")
     app.state.rocky = state
 
-    if STATIC_DIR.exists():
-        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    if not attach_only:
+        if STATIC_DIR.exists():
+            app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-    @app.get("/", response_class=HTMLResponse)
-    async def index() -> str:
-        index_file = STATIC_DIR / "index.html"
-        if index_file.exists():
-            return index_file.read_text(encoding="utf-8")
-        return "<h1>Rocky Mini</h1><p>Settings UI not built.</p>"
+        @app.get("/", response_class=HTMLResponse)
+        async def index() -> str:
+            index_file = STATIC_DIR / "index.html"
+            if index_file.exists():
+                return index_file.read_text(encoding="utf-8")
+            return "<h1>Rocky Mini</h1><p>Settings UI not built.</p>"
 
     @app.get("/api/state")
     async def get_state() -> dict:

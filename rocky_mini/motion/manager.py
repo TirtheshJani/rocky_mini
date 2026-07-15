@@ -12,13 +12,16 @@ that run() would send, which is what the tests exercise.
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Callable
 
 from .emotes import PRIMARY_EMOTES, REFLEX_EMOTES, Trajectory, jazz_hands_delta
 from .idle import breathing_delta, sleepwatch_delta
-from .pose import Pose, apply_deltas, blend_factor, clamp_pose, lerp_pose
+from .pose import Pose, apply_deltas, blend_factor, clamp_pose, lerp_pose, sdk_targets
 from .wobble import WobbleTracker
+
+logger = logging.getLogger("rocky_mini.motion")
 
 
 class MovementManager:
@@ -85,7 +88,12 @@ class MovementManager:
         return clamp_pose(final)
 
     # -- live loop ---------------------------------------------------------
-    def run(self, mini: object, stop, hz: float = 100.0) -> None:  # pragma: no cover - hardware loop
+    def run(self, mini: object, stop, hz: float = 100.0, ramp_s: float = 0.6) -> None:
+        """Drive set_target at hz until stop is set, then ramp to neutral.
+
+        The ramp is part of the ordered shutdown (plan.md): Rocky settles to the
+        rest pose (antennas at ~10 deg, footgun 6) instead of freezing mid-emote.
+        """
         period = 1.0 / hz
         last = self.clock()
         while not stop.is_set():
@@ -97,10 +105,38 @@ class MovementManager:
             sleep_left = period - (self.clock() - now)
             if sleep_left > 0:
                 time.sleep(sleep_left)
+        self._ramp_to_neutral(mini, hz=hz, duration=ramp_s)
 
-    def _set_target(self, mini: object, pose: Pose) -> None:  # pragma: no cover - hardware
-        # The ONE place set_target is called. Adapt to the SDK pose type lazily.
-        setter = getattr(mini, "set_target", None)
-        if setter is None:
-            return
-        setter(pose)
+    def _ramp_to_neutral(self, mini: object, hz: float, duration: float) -> None:
+        neutral = Pose()
+        steps = max(1, int(duration * hz))
+        start = self.current_primary
+        for i in range(1, steps + 1):
+            pose = clamp_pose(lerp_pose(start, neutral, i / steps))
+            self._set_target(mini, pose)
+            time.sleep(1.0 / hz)
+        self.current_primary = neutral
+
+    def _set_target(self, mini: object, pose: Pose) -> None:
+        # The ONE place set_target is called (footgun 1). SDK 1.9.0 contract:
+        # head 4x4 matrix, antennas [right, left] radians, body_yaw radians.
+        head, antennas, body_yaw = sdk_targets(pose)
+        try:
+            mini.set_target(head=head, antennas=antennas, body_yaw=body_yaw)
+            self._set_target_errors = 0
+        except AttributeError:
+            # A handle without set_target means the SDK contract changed or the
+            # wrong object was passed. Never shrug this off (audit F4).
+            raise
+        except Exception as exc:
+            # Transient daemon hiccups happen at 100 Hz; log once per second,
+            # not one hundred times (pattern from the official Conversation App).
+            self._set_target_errors = getattr(self, "_set_target_errors", 0) + 1
+            now = self.clock()
+            if now - getattr(self, "_last_error_log", 0.0) >= 1.0:
+                logger.error(
+                    "set_target failed (%d since last report): %s",
+                    self._set_target_errors, exc,
+                )
+                self._last_error_log = now
+                self._set_target_errors = 0

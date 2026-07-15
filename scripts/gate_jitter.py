@@ -18,6 +18,7 @@ and then called unchanged. Numbers to beat (PC baseline, mockup daemon):
 mean 98.79 Hz, tick p50 10.11 ms, p99 10.33 ms, max 11.50 ms, 0 ticks > 25 ms.
 """
 
+import argparse
 import threading
 from time import perf_counter
 
@@ -25,6 +26,30 @@ import numpy as np
 from reachy_mini import ReachyMini
 
 DURATION_S = 60.0
+
+
+def _vad_load(stop: threading.Event) -> None:
+    """Real-time Silero inference on synthetic frames: Phase 1b's CPU cost.
+
+    Run the gate once bare and once with --load vad. The delta between the two
+    reports is what the voice-in thread costs the motion loop on this machine,
+    which answers "did 1b push us off 100 Hz, or was the loop never holding it".
+    """
+    from rocky_mini.audio.vad import SileroVAD
+
+    vad = SileroVAD()
+    frame = (np.random.default_rng(0).standard_normal(512) * 0.1).astype(np.float32)
+    period = 512 / 16000  # real-time cadence: 31.25 inferences/s
+    inferences = 0
+    t_next = perf_counter()
+    while not stop.is_set():
+        vad.probability(frame)
+        inferences += 1
+        t_next += period
+        delay = t_next - perf_counter()
+        if delay > 0:
+            stop.wait(delay)
+    print(f"vad load thread: {inferences} inferences ({inferences / DURATION_S:.1f}/s)")
 
 records: list[tuple[float, str]] = []
 _orig = ReachyMini.set_target
@@ -41,10 +66,25 @@ from rocky_mini.main import RockyMiniApp  # noqa: E402  (after the wrap, on purp
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--load", choices=["vad"], default=None,
+        help="add Phase 1b's VAD inference load at real-time cadence during the run",
+    )
+    args = parser.parse_args()
+
     app = RockyMiniApp()
+    load_thread = None
+    if args.load == "vad":
+        load_thread = threading.Thread(
+            target=_vad_load, args=(app.stop_event,), daemon=True, name="VadLoad"
+        )
+        load_thread.start()
     threading.Timer(DURATION_S, app.stop_event.set).start()  # = dashboard Stop
     t0 = perf_counter()
     app.wrapped_run()
+    if load_thread is not None:
+        load_thread.join(timeout=2.0)
     wall = perf_counter() - t0
 
     ts = np.array([r[0] for r in records])

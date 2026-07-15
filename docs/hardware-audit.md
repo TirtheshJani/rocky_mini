@@ -327,14 +327,38 @@ touches hardware, and that is the 1a-tested ReachyMediaIO.
 
 Live path proof against the mockup daemon (test input injected into FakeAudioIO;
 everything downstream is the real path: AudioInThread -> MovementManager ->
-set_target -> daemon):
+set_target -> daemon). Decomposed reading, sampled with the breath sweep predicted
+from the manager's own clock:
 
 ```
-daemon head yaw before DoA: +1.92 deg      (breathing sweep)
-daemon head yaw after  DoA: +18.88 deg     (DoA 25 deg: 0.6*25 head + 0.2*25 body, world frame)
+     t head_yaw_deg body_yaw_deg breath_pred head-minus-breath
+3714.1        13.93         5.00       -0.38             14.30
+3714.9        15.30         5.00        1.03             14.27
+3715.7        16.65         5.00        2.31             14.34
+3716.5        17.78         5.00        3.30             14.48
+3717.3        18.58         5.00        3.88             14.70
 motion.doa_deg = 25.0
-clean exit after stop_event
 ```
+
+Reconciliation: the daemon's present_head_pose reports the head only; body yaw is a
+separate channel and reads exactly +5.00 (0.2 * 25). Head yaw = 15.0 (0.6 * 25, the
+DoA lead) + the breathing sonar sweep (+/-4 deg at 0.07 Hz). The remaining few
+tenths of separation from exactly 15 are the sweep passing through the primary
+layer's 0.4 s blend filter (predicted lag at that frequency: up to ~0.44 deg). The
+gains are exactly as designed; an earlier report of this number wrongly added the
+body follow into the head-only reading.
+
+Shutdown re-proof with all four 1b threads live (MotionThread, MixerPump,
+AudioInThread, conversation asyncio loop), real launch shape, SIGINT:
+
+```
+exit after SIGINT: 0.86 s
+log: "Rocky Mini shutdown complete; memory fsynced per write." / "App is stopping..."
+final antennas: [0.17453, 0.17453] rad = 10.0 deg
+```
+
+A wedged DoA USB read cannot hang exit: AudioInThread is joined with a 1 s timeout
+and is a daemon thread, so shutdown is bounded by construction.
 
 Suite: 164 tests pass, both with the SDK installed and with it import-blocked.
 

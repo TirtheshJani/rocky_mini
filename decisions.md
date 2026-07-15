@@ -64,11 +64,14 @@ Format: date | decision | reasoning | reversal condition.
     3.10 floor. HF Space README front matter is adopted at publish time. Reversal:
     re-run the diff on SDK upgrade (same as the audit itself).
 
-11. **Silero VAD is vendored as an ONNX file, not a package dependency.** The
-    `silero-vad` PyPI package (v6+) requires torch + torchaudio, which pulls the CUDA
-    stack: gigabytes of wheels on a 4 GB CM4 that plan.md explicitly avoids ("Silero
-    via onnxruntime, no torch"). The 2.3 MB `silero_vad.onnx` (MIT) is vendored under
-    `rocky_mini/assets/models/` with provenance in its README, and `audio/vad.py` runs
-    it with onnxruntime pinned to single-threaded sessions to protect the motion loop.
-    Reversal: if Silero ships a torch-free package again, or the app moves off the CM4,
-    depend on the package instead.
+11. **Silero VAD is vendored as an ONNX file, not a package dependency.** Every
+    published `silero-vad` wheel declares `Requires-Dist: torch` + `torchaudio`
+    (checked: 6.2.1 and 5.1.2 both do), which pulls the CUDA stack: gigabytes of
+    wheels on a 4 GB CM4 that plan.md explicitly avoids ("Silero via onnxruntime,
+    no torch"). Pinning `<6` was considered and rejected on that evidence. The 2.3 MB
+    `silero_vad.onnx` (MIT) is vendored under `rocky_mini/assets/models/` with
+    provenance in its README, and `audio/vad.py` runs it with onnxruntime pinned to
+    single-threaded sessions to protect the motion loop. Side benefit, not the
+    reason: the model ships with the app, so a robot that boots without network
+    still has ears. Reversal: if Silero ships a torch-free package, or the app moves
+    off the CM4, depend on the package instead.

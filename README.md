@@ -82,6 +82,9 @@ memory export.
 - Brain: Qwen2.5-7B-Instruct (Apache-2.0) served locally by Ollama; optional Rocky LoRA
   trained on authored + curated-transcript data (`finetune/data/`).
 - STT: faster-whisper. TTS: Piper `en_US-lessac-medium`. No cloud, no keys.
+- VAD: Silero VAD, vendored as `rocky_mini/assets/models/silero_vad.onnx` (MIT,
+  Silero Team; from the silero-vad 6.2.1 wheel) and run with onnxruntime, no torch.
+  See `rocky_mini/assets/models/README.md` and decisions.md #11.
 - Memory lives in `~/.rocky_mini/` (survives app reinstalls); export/import zip migrates a
   sim-raised Rocky onto the robot.
 

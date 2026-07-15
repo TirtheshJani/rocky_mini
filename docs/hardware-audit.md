@@ -257,6 +257,54 @@ These stay open no matter how good the sim work is, and each becomes a bring-up.
 8. `imu['temperature']` actually returning data on the Wireless (M3 says the surface
    exists; the value needs hardware).
 
+## Phase 1a verification (sim daemon, real app path, post-fix)
+
+Backend: the daemon's mockup backend, not MuJoCo. Reason: the mockup behaves
+identically to a real robot from an app's point of view (daemon.py's own comment), the
+MuJoCo package is not installed in this environment, and the mockup gives a cleaner
+loop with no physics-step timing noise. All commands below ran with
+`ROCKY_MEDIA_BACKEND=no_media ROCKY_AUDIO_BACKEND=fake` (this container has no audio
+device; motion and lifecycle are the real path).
+
+Launch through the daemon's exact shape (`python -u -m rocky_mini.main`), settings UI
+served by the SDK base class on 8042:
+
+```
+GET / -> 200
+GET /api/state -> {"model":"qwen2.5:7b-instruct", ... "sim_mode":true}
+POST /api/emote {"name":"jazz_hands"} -> {"fired":"jazz_hands"}
+```
+
+Motion flowing end to end (daemon's present pose while Rocky breathes; antennas
+oscillate near 10 deg, head z bobs at the 0.25 Hz breath):
+
+```
+/api/state/present_antenna_joint_positions -> [0.195, 0.197] then [0.176, 0.182] then [0.155, 0.159]
+```
+
+Stop (SIGINT, what the dashboard sends), ordered shutdown, and rest pose:
+
+```
+exit after SIGINT: 0.89 s   (daemon force-kills at 20 s; we are nowhere near)
+log: "Rocky Mini shutdown complete; memory fsynced per write." / "App is stopping..."
+final antennas: [0.17453, 0.17453] rad = exactly 10.0 deg (footgun 6 held through shutdown)
+```
+
+60 s at 100 Hz through `wrapped_run()` with an observation-only wrapper recording
+every `set_target` call (timestamp + calling thread):
+
+```
+wall time incl. shutdown: 60.63 s
+set_target calls: 5955  (expected ~6000 at 100 Hz + ramp)
+calling threads: {'MotionThread'}          <- exactly one owner (footgun 1)
+mean rate: 98.79 Hz
+tick interval ms: p50=10.11 p95=10.19 p99=10.33 max=11.50
+ticks > 15 ms late (interval > 25 ms): 0
+```
+
+The mean is 98.79 Hz, not 100: the sleep-based loop overshoots by ~0.1 ms per tick.
+Honest number, kept as is; the CM4 measurement in bring-up.md is the one that matters.
+
 ## Evidence appendix (live probe output, mockup daemon, SDK 1.9.0)
 
 ```

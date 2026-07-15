@@ -31,6 +31,14 @@
   instructions are in README.md and server/README.md; finetune/ is scaffolded but not
   executed (no GPU here).
 
+## SDK pin (hardware audit, 2026-07-15)
+
+- reachy-mini **1.9.0** (PyPI) installed and audited against; every finding in
+  `docs/hardware-audit.md` is specific to this version. Re-audit on upgrade.
+- Audited on Linux/Python 3.11 with the daemon's mockup backend
+  (`reachy-mini-daemon --mockup-sim --headless --no-media --autostart`); live probes
+  in the audit's evidence appendix were run against that daemon.
+
 ## Footgun reminders
 
 See CLAUDE.md. Most load-bearing: one set_target owner, one push_audio_sample owner,

@@ -11,6 +11,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+import numpy as np
+
 ANTENNA_REST = 10.0
 ANTENNA_MIN = 3.0
 ANTENNA_MAX = 45.0
@@ -62,6 +64,31 @@ def blend_factor(dt: float, tau: float = 0.4) -> float:
     if tau <= 0:
         return 1.0
     return 1.0 - math.exp(-dt / tau)
+
+
+def sdk_targets(pose: Pose) -> tuple[np.ndarray, list[float], float]:
+    """Convert a Pose to the reachy-mini SDK set_target arguments (audit F4).
+
+    SDK 1.9.0 contract: head is a 4x4 float64 pose matrix (rotation + translation in
+    meters), antennas is [right, left] in radians, body_yaw is radians. Rocky's Pose
+    keeps degrees for angles and meters for head_z; the conversion happens only here.
+    """
+    roll = math.radians(pose.head_roll)
+    pitch = math.radians(pose.head_pitch)
+    yaw = math.radians(pose.head_yaw)
+    # Extrinsic xyz Euler to rotation matrix, same convention as the SDK's
+    # create_head_pose (scipy R.from_euler("xyz", ...)).
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    rx = np.array([[1, 0, 0], [0, cr, -sr], [0, sr, cr]])
+    ry = np.array([[cp, 0, sp], [0, 1, 0], [-sp, 0, cp]])
+    rz = np.array([[cy, -sy, 0], [sy, cy, 0], [0, 0, 1]])
+    head = np.eye(4)
+    head[:3, :3] = rz @ ry @ rx
+    head[2, 3] = pose.head_z
+    antennas = [math.radians(pose.antenna_right), math.radians(pose.antenna_left)]
+    return head, antennas, math.radians(pose.body_yaw)
 
 
 def clamp_pose(pose: Pose) -> Pose:

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .dsp import ring_mod, soft_clip
+from .dsp import resample, ring_mod, soft_clip
 from .io import AudioIO
 
 
@@ -56,14 +56,25 @@ class Mixer:
         self.dropped_generations = 0  # for tests/metrics
 
     # -- producers ---------------------------------------------------------
-    def push_voice(self, pcm: np.ndarray, generation: int) -> None:
-        self._voice.append(VoiceItem(np.asarray(pcm, dtype=np.float32), generation))
+    def push_voice(self, pcm: np.ndarray, generation: int, src_rate: int | None = None) -> None:
+        """Queue voice PCM. src_rate converts once at the boundary (e.g. Piper's
+        22050 into the robot's 16000) so the whole chain runs at one rate."""
+        pcm = np.asarray(pcm, dtype=np.float32)
+        if src_rate is not None and src_rate != self.sample_rate:
+            pcm = resample(pcm, src_rate, self.sample_rate)
+        self._voice.append(VoiceItem(pcm, generation))
 
     def push_chord(self, pcm: np.ndarray) -> None:
         self._chord.append(np.asarray(pcm, dtype=np.float32))
 
     def set_generation(self, generation: int) -> None:
-        """Barge-in: any queued voice older than this is discarded on next render."""
+        """Barge-in: drop queued stale voice AND whatever the device already holds.
+
+        The queue drop alone is not enough on hardware: frames already handed to
+        the SDK's GStreamer pipeline keep playing without the flush (audit F8).
+        """
+        if generation > self._generation:
+            self.io.flush()
         self._generation = generation
 
     @property

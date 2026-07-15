@@ -230,7 +230,11 @@ class ConversationLoop:
         if chunk.text:
             pcm = await self.tts.synthesize(chunk.text)
             if pcm.size:
-                self.mixer.push_voice(pcm, self.generation)
+                # src_rate lets the Mixer convert Piper's 22050 to the device rate
+                # once at the boundary (no-op when the rates already match).
+                self.mixer.push_voice(
+                    pcm, self.generation, src_rate=getattr(self.tts, "sample_rate", None)
+                )
                 if metrics.t_first_audio is None:
                     metrics.t_first_audio = self.clock()
 

@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     )
 
     # Brain server (Ollama, OpenAI-compatible).
+    llm_backend: str = "fake"  # "fake" (sim/test default) | "ollama" (real local brain).
     llm_base_url: str = "http://localhost:11434/v1"
     llm_api_key: str = "ollama"  # Ollama ignores the value but the client requires one.
     model: str = "qwen2.5:7b-instruct"  # toggle: rocky:latest for the LoRA build.

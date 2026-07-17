@@ -22,7 +22,7 @@ from .audio.io import FakeAudioIO
 from .audio.output import Mixer
 from .brain.auditor import NaivetyAuditor
 from .brain.curiosity import CuriosityScheduler
-from .brain.llm import FakeLLM
+from .brain.llm import LLM, FakeLLM, OllamaLLM
 from .brain.reflection import ReflectionWorker
 from .brain.tools import ToolExecutor
 from .config import Settings, load_settings
@@ -48,6 +48,24 @@ def metrics_to_dict(m: TurnMetrics) -> dict:
         "tool_calls": m.tool_calls,
         "tool_errors": m.tool_errors,
     }
+
+
+def _build_llm(settings: Settings) -> LLM:
+    """Select the LLM backend.
+
+    Defaults to the in-process Fake (driven by SimResponder) so the sim and test path
+    needs no Ollama, no openai client, and no GPU (decision 4's seam). Set
+    ROCKY_LLM_BACKEND=ollama to point the running app at the real local brain; the
+    openai client is imported lazily inside OllamaLLM, so it is only required on that path.
+    """
+    if settings.llm_backend == "ollama":
+        return OllamaLLM(
+            base_url=settings.llm_base_url,
+            model=settings.model,
+            api_key=settings.llm_api_key,
+            keep_alive=settings.keep_alive,
+        )
+    return FakeLLM(SimResponder())
 
 
 @dataclass
@@ -89,7 +107,7 @@ class AppState:
             reflection=ReflectionWorker(),
         )
         loop = ConversationLoop(
-            llm=FakeLLM(SimResponder()),
+            llm=_build_llm(settings),
             tts=FakeTTS(sample_rate=settings.sample_rate_out),
             mixer=mixer,
             memory=memory,
@@ -117,7 +135,7 @@ class AppState:
             "generation": self.loop.generation,
             "fact_count": len(self.memory.active_facts()),
             "question_count": len(self.memory.active_questions()),
-            "sim_mode": True,
+            "sim_mode": self.settings.llm_backend != "ollama",
         }
 
     async def publish(self, event: dict) -> None:

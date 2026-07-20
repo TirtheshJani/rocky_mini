@@ -66,6 +66,7 @@ memory export.
    ```
 2. **Config.** In `~/.rocky_mini/.env` (never in the repo) set:
    ```
+   ROCKY_LLM_BACKEND=ollama                # "fake" (sim/test default) or "ollama"
    ROCKY_LLM_BASE_URL=http://<pc-lan-ip>:11434/v1
    ROCKY_SPEECH_BASE_URL=http://<pc-lan-ip>:8123
    ROCKY_MODEL=qwen2.5:7b-instruct         # or rocky:latest once the LoRA is trained
@@ -74,13 +75,22 @@ memory export.
 3. **Robot app.** `pip install -e ".[robot,llm,vad]"`, then install to the Reachy dashboard
    (the `reachy_mini_apps` entry point). The daemon launches `RockyMiniApp` with a live
    `mini`; MotionThread and Mixer take over the hardware surfaces.
-4. **Rocky LoRA (optional, $0).** See `finetune/README.md` (WSL2 + Unsloth). Train -> GGUF
-   Q5_K_M -> `ollama create rocky` -> gate with `finetune/eval.py` -> flip `ROCKY_MODEL`.
+4. **Rocky LoRA (optional, $0).** See `finetune/README.md` (WSL2 + Unsloth). Build the
+   dataset -> QLoRA train -> merge + GGUF Q5_K_M -> `ollama create rocky` -> gate with
+   `finetune/eval.py --model rocky:latest --baseline qwen2.5:7b-instruct` -> set
+   `ROCKY_LLM_BACKEND=ollama` and `ROCKY_MODEL=rocky:latest`.
+
+> Latency is still a budget (2.5 s p50), not yet a measured number. On the PC run
+> `python scripts/measure_latency.py --text-only` (Ollama + TTS) then the full harness to
+> record real numbers, and `python scripts/check_kv_reuse.py` to confirm the byte-stable
+> persona is KV-cache reused. Update this line with the measured p50 once you have it.
 
 ## Data provenance
 
 - Brain: Qwen2.5-7B-Instruct (Apache-2.0) served locally by Ollama; optional Rocky LoRA
-  trained on authored + curated-transcript data (`finetune/data/`).
+  trained on authored gold, off-novel synthetic Q&A, a neutral-replay slice, and short
+  paraphrased voice calibration from the novel. The dataset and model stay local and are
+  not distributed (decisions.md 14); `finetune/data/*.jsonl` are gitignored artifacts.
 - STT: faster-whisper. TTS: Piper `en_US-lessac-medium`. No cloud, no keys.
 - VAD: Silero VAD, vendored as `rocky_mini/assets/models/silero_vad.onnx` (MIT,
   Silero Team; from the silero-vad 6.2.1 wheel) and run with onnxruntime, no torch.
@@ -93,7 +103,9 @@ memory export.
 ```bash
 pytest -q                          # unit + API + sim e2e integration
 python finetune/eval.py --sim      # the LoRA ship gate, demoed on the sim brain
-python finetune/make_seed.py       # regenerate the seed dataset
+python finetune/make_seed.py       # authored gold seed (-> data/authored.jsonl)
+python finetune/neutral.py         # neutral replay set (-> data/neutral.jsonl)
+python finetune/build_dataset.py   # assemble + QC the training set (add synth.py/mine_book.py on the GPU box)
 python scripts/make_canned.py      # regenerate offline fallback WAVs
 # UI: start the sim server, then tests/ui/pw-rocky-ui.js via the playwright-skill
 ```

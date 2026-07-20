@@ -75,3 +75,43 @@ Format: date | decision | reasoning | reversal condition.
     reason: the model ships with the app, so a robot that boots without network
     still has ears. Reversal: if Silero ships a torch-free package, or the app moves
     off the CM4, depend on the package instead.
+
+## 2026-07-20
+
+12. **Rocky's voice is blended: signature tics kept, telegraphic rigidity loosened,
+    warmth added.** The persona (`brain/persona.py`) keeps every tic (the ', question?'
+    particle, word-tripling, 'Rocky fix.', clipped 'Thank.'/'Understand.', the epistemic
+    ledger) but drops the hard under-sixty-word cap and the seventy-percent article-drop
+    in favour of fuller, warmer sentences and an explicit friendship register. Reasoning:
+    TJ's call; the pure telegraphic style read as colder than the novel's Rocky, and the
+    LoRA can carry a warmer voice without a larger prompt. This edits the character-system
+    spec in plan.md (article-drop ~70%, <60 words). tics.py is unchanged: it still forces
+    the particle (kept) and only measures article-drop (now a soft target). The eval gate's
+    particle threshold stays. Reversal: if the warmer voice measurably raises naivety leaks
+    or weakens the tics in eval.py, tighten the speech rules back toward telegraphic.
+
+13. **The running app selects its LLM via a config flag; the Fake stays the default.**
+    `AppState.build` now calls `_build_llm(settings)`: `ROCKY_LLM_BACKEND=ollama` wires the
+    real `OllamaLLM`, otherwise the in-process `FakeLLM(SimResponder)` runs. Reasoning: the
+    app needed the real brain wired for Phase 3, but decision 4's seam must hold. The openai
+    import stays lazy inside `OllamaLLM`, so importing the app never pulls it in and the
+    sim/test path stays green with no Ollama, no openai, no GPU. Reversal: none; this is the
+    same lazy-import discipline as the other real clients.
+
+14. **The LoRA dataset is local, non-distributed, and built to teach voice not plot.**
+    The training data is authored gold plus off-novel synthetic Q&A plus a neutral-replay
+    slice, with the novel used only for short PARAPHRASED voice calibration (mine_book.py),
+    never long verbatim spans. A held-out verbatim probe set (`holdout_probes.jsonl`) is
+    never trained on and is used by eval.py to confirm the model does not regurgitate book
+    text. Reasoning: fine-tuning on reproduction-shaped tasks is exactly what unlocks
+    verbatim memorization; off-novel + paraphrase teaches mannerisms and is the copyright-
+    safe design. All `finetune/data/*.jsonl` are gitignored build artifacts; only the
+    builder scripts and schema are tracked. Reversal: none; this is a standing constraint.
+
+15. **Serve the LoRA by merge-then-quantize, not an adapter on the quantized base.**
+    train.py produces a LoRA; the runbook merges it into a full-precision Qwen2.5-7B and
+    quantizes the single result to GGUF q5_K_M for `ollama create rocky`. Reasoning:
+    llama.cpp will apply an f16 adapter over a quantized base, but Ollama's own docs warn a
+    quantization mismatch between the adapter's base and the served base gives erratic
+    results; merging sidesteps it. Reversal: adopt the ADAPTER directive path only if
+    swappable per-character adapters are needed, and then pair it with a full-precision base.

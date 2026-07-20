@@ -39,6 +39,27 @@
   (`reachy-mini-daemon --mockup-sim --headless --no-media --autostart`); live probes
   in the audit's evidence appendix were run against that daemon.
 
+## Local-machine session (2026-07-20): LoRA-first + real-brain wiring
+
+Done here (no robot, no GPU needed; all tests green with and without SDK/Ollama):
+- Wired the real LLM behind `ROCKY_LLM_BACKEND` (default still Fake). decisions.md 13.
+- Blended Rocky's voice (kept tics, loosened rigidity, added warmth). decisions.md 12.
+- Built the LoRA dataset pipeline: `make_seed.py` (authored gold), `neutral.py`
+  (anti-forgetting replay), `synth.py` (off-novel bulk via Ollama), `mine_book.py`
+  (paraphrased book calibration + memorization probes), `build_dataset.py` (QC that
+  reuses the runtime character utilities). Data is gitignored and local. decisions.md 14.
+- eval.py is now the full ship gate: A/B baseline, memorization probe, capability
+  regression. train.py tuned (2 epochs, num_proc=1). Merge-then-quantize serve runbook in
+  finetune/README. decisions.md 15.
+- scripts/check_kv_reuse.py closes the audit's INCONCLUSIVE footgun-4 gap.
+
+Needs TJ's machine (documented in docs/tutorial.md and docs/bring-up.md):
+- Ollama pull + stock baseline turn; synth/mine_book bulk generation to reach 250-350;
+  WSL2 QLoRA train + merge + `ollama create rocky`; run the eval gate; flip ROCKY_MODEL.
+- Speech server real STT/TTS models; `scripts/measure_latency.py` real numbers;
+  `scripts/check_kv_reuse.py` verdict. These produce the honest latency figures the
+  README still states as a budget.
+
 ## Footgun reminders
 
 See CLAUDE.md. Most load-bearing: one set_target owner, one push_audio_sample owner,

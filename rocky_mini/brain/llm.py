@@ -109,6 +109,8 @@ class OllamaLLM:
         model: str,
         api_key: str = "ollama",
         keep_alive: int = -1,
+        temperature: float | None = None,
+        seed: int | None = None,
     ) -> None:
         try:
             from openai import AsyncOpenAI
@@ -119,6 +121,10 @@ class OllamaLLM:
         self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         self._model = model
         self._keep_alive = keep_alive
+        # None keeps the served model's own sampling settings (runtime path).
+        # The eval gate pins temperature=0 and a seed so PASS/FAIL is reproducible.
+        self._temperature = temperature
+        self._seed = seed
 
     async def stream(  # pragma: no cover - requires a live Ollama server
         self, messages: list[dict], tools: list[dict] | None = None
@@ -130,6 +136,10 @@ class OllamaLLM:
             "stream_options": {"include_usage": True},
             "extra_body": {"keep_alive": self._keep_alive},
         }
+        if self._temperature is not None:
+            kwargs["temperature"] = self._temperature
+        if self._seed is not None:
+            kwargs["seed"] = self._seed
         if tools:
             kwargs["tools"] = tools
         tool_acc: dict[int, dict] = {}

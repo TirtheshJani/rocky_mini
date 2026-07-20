@@ -29,9 +29,9 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
+        from unsloth import FastLanguageModel  # must import before trl so its patches bind
         from datasets import load_dataset
         from trl import SFTTrainer, SFTConfig
-        from unsloth import FastLanguageModel
     except ImportError as exc:
         raise SystemExit(
             "Unsloth/TRL/datasets not installed. Training runs in WSL2 with CUDA; "
@@ -63,7 +63,7 @@ def main() -> None:
 
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         train_dataset=dataset,
         args=SFTConfig(
             output_dir=args.out,
@@ -75,6 +75,7 @@ def main() -> None:
             logging_steps=5,
             seed=args.seed,
             dataset_text_field="text",
+            eos_token="<|im_end|>",  # Qwen2.5 chat EOS; Unsloth's tokenizer reports a placeholder.
             dataset_num_proc=1,  # Unsloth on Windows/WSL crashes with multiprocess mapping.
         ),
     )

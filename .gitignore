@@ -39,3 +39,10 @@ finetune/data/*.jsonl.gz
 finetune/outputs/
 *.gguf
 data/pickles/
+
+# local model artifacts (never distributed)
+outputs/
+*.onnx
+*.onnx.json
+unsloth_compiled_cache/
+rocky_mini/unsloth_compiled_cache/

@@ -88,5 +88,12 @@ class Settings(BaseSettings):
 
 
 def load_settings(**overrides: object) -> Settings:
-    """Construct Settings, applying explicit overrides (used by tests)."""
+    """Construct Settings, applying explicit overrides (used by tests).
+
+    A home_dir override also redirects the .env file to that home, so tests are
+    hermetic against the real user's ~/.rocky_mini/.env (which may select the
+    ollama backend on a machine where the LoRA has shipped).
+    """
+    if "home_dir" in overrides and "_env_file" not in overrides:
+        overrides["_env_file"] = str(Path(str(overrides["home_dir"])) / ".env")
     return Settings(**overrides)

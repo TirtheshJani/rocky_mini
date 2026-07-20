@@ -74,13 +74,18 @@ def sim_responder():
 def ollama_responder(model: str, base_url: str):  # pragma: no cover - needs live server
     from rocky_mini.brain.llm import FakeReply, OllamaLLM, ToolCall
 
-    llm = OllamaLLM(base_url=base_url, model=model)
+    llm = OllamaLLM(base_url=base_url, model=model, temperature=0.0, seed=42)
+    from rocky_mini.brain.persona import PersonaProfile, build_messages
     from rocky_mini.brain.tools import tool_specs
+
+    # Score the model exactly as the app serves it: the full byte-stable persona
+    # prefix plus session digest, not the Modelfile's one-line fallback SYSTEM.
+    persona_prefix = build_messages(PersonaProfile())
 
     async def _one(q: str) -> FakeReply:
         text, tcs = "", []
         async for ev in llm.stream(
-            [{"role": "user", "content": q}], tools=tool_specs()
+            persona_prefix + [{"role": "user", "content": q}], tools=tool_specs()
         ):
             text += ev.delta
             if ev.done:
@@ -100,7 +105,9 @@ def evaluate(responder) -> dict:
     for prompt in TIC_PROMPTS:
         r = lint(responder(prompt).text)
         particle_hits += r.metrics.question_particle_hits
-        particle_total += max(1, r.metrics.question_sentences)
+        # Only actual question sentences count; a reply with no questions is not
+        # an unparticled question. The rate stays 1.0 when no questions occur.
+        particle_total += r.metrics.question_sentences
         tripling += r.metrics.tripling_count
         article_rate_sum += r.metrics.article_rate
     particle_rate = particle_hits / particle_total if particle_total else 1.0
@@ -183,11 +190,37 @@ def memorization_probe(continue_fn, probes: list[dict], prime: int = 4) -> dict:
     return {"probes_checked": checked, "max_verbatim_run": worst, "passed": worst < MAX_VERBATIM_RUN}
 
 
+def neutral_responder(model: str, base_url: str):  # pragma: no cover - needs live server
+    """Capability probe responder with a neutral system message.
+
+    The served model may carry a baked-in persona SYSTEM (finetune/Modelfile). Under that
+    persona, refusing untaught Earth facts is correct behavior, so bare capability
+    questions would measure persona compliance instead of retained knowledge. A neutral
+    system message overrides the Modelfile SYSTEM and isolates raw capability.
+    """
+    from rocky_mini.brain.llm import FakeReply, OllamaLLM
+
+    llm = OllamaLLM(base_url=base_url, model=model, temperature=0.0, seed=42)
+
+    async def _one(q: str) -> FakeReply:
+        text = ""
+        async for ev in llm.stream(
+            [
+                {"role": "system", "content": "You are a helpful assistant. Answer factually and concisely."},
+                {"role": "user", "content": q},
+            ]
+        ):
+            text += ev.delta
+        return FakeReply(text=text, tool_calls=[])
+
+    return lambda q: asyncio.get_event_loop().run_until_complete(_one(q))
+
+
 def continue_responder(model: str, base_url: str):  # pragma: no cover - needs live server
     """A plain text-continuation responder (no persona, no tools) for the memory probe."""
     from rocky_mini.brain.llm import OllamaLLM
 
-    llm = OllamaLLM(base_url=base_url, model=model)
+    llm = OllamaLLM(base_url=base_url, model=model, temperature=0.0, seed=42)
 
     async def _one(prime: str) -> str:
         text = ""
@@ -233,7 +266,7 @@ def main() -> None:
 
     # Memorization + capability checks only run against a live model (need continuation).
     if args.model:
-        report["capability"] = round(capability_score(responder), 3)
+        report["capability"] = round(capability_score(neutral_responder(args.model, args.base_url)), 3)
         print(f"  capability: {report['capability']}")
         probes = load_probes()
         if probes:
@@ -246,7 +279,7 @@ def main() -> None:
     # A/B gate against the baseline.
     if args.baseline:
         base = evaluate(ollama_responder(args.baseline, args.base_url))
-        base["capability"] = round(capability_score(ollama_responder(args.baseline, args.base_url)), 3)
+        base["capability"] = round(capability_score(neutral_responder(args.baseline, args.base_url)), 3)
         print(f"== Baseline: {args.baseline} ==")
         for k, v in base.items():
             print(f"  {k}: {v}")

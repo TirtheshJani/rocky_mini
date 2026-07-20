@@ -101,13 +101,10 @@ async def tts_wav(client: httpx.AsyncClient, base_url: str, text: str) -> tuple[
     """Ask the speech server to speak the question, for feeding back into /stt."""
     r = await client.post(f"{base_url}/tts", json={"text": text}, timeout=60.0)
     r.raise_for_status()
-    import io
-    import wave
-
-    with wave.open(io.BytesIO(r.content)) as w:
-        rate = w.getframerate()
-        pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
-    return pcm.astype(np.float32) / 32768.0, rate
+    # The server returns raw int16 PCM frames (same contract as speech/tts.py's
+    # runtime client), not a WAV container. Piper medium voices run at 22050 Hz.
+    pcm = np.frombuffer(r.content, dtype=np.int16)
+    return pcm.astype(np.float32) / 32768.0, 22050
 
 
 def p50(xs: list[float]) -> float:

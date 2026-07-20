@@ -84,7 +84,12 @@ async def tts(body: TTSIn) -> Response:  # pragma: no cover - needs the voice
         raise HTTPException(503, f"TTS voice unavailable: {exc}")
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wav:
-        voice.synthesize(body.text, wav)
+        # piper-tts >= 1.3 renamed the wav-writing entry point to synthesize_wav
+        # (synthesize now yields raw AudioChunks and does not set wave params).
+        if hasattr(voice, "synthesize_wav"):
+            voice.synthesize_wav(body.text, wav)
+        else:
+            voice.synthesize(body.text, wav)
     buf.seek(0)
     with wave.open(buf, "rb") as wav:
         frames = wav.readframes(wav.getnframes())

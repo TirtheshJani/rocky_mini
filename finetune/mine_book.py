@@ -170,7 +170,7 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--max-lines", type=int, default=120, help="cap candidate lines mined")
     parser.add_argument("--probes", type=int, default=12, help="verbatim memorization probes")
-    parser.add_argument("--probe-words", type=int, default=6)
+    parser.add_argument("--probe-words", type=int, default=12, help="words per probe (prime + target)")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--dry-run", action="store_true", help="extract + count only; call no model")
     args = parser.parse_args()

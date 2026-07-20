@@ -19,7 +19,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train the Rocky LoRA (Unsloth QLoRA)")
     parser.add_argument("--data", default="finetune/data/rocky_dialogues.jsonl")
     parser.add_argument("--out", default="outputs/rocky-lora")
-    parser.add_argument("--epochs", type=int, default=3)
+    # 2 epochs by default: style is cheap to teach and over-training a small set drives
+    # catastrophic forgetting (naive style tunes lose 12 to 18 percent on instruction
+    # following). The neutral-replay rows in the data are the other guard. Raise only if
+    # the eval gate shows the voice is too weak.
+    parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--rank", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -71,6 +75,7 @@ def main() -> None:
             logging_steps=5,
             seed=args.seed,
             dataset_text_field="text",
+            dataset_num_proc=1,  # Unsloth on Windows/WSL crashes with multiprocess mapping.
         ),
     )
     trainer.train()

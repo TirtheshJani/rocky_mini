@@ -4,7 +4,9 @@ The system prompt is five blocks (identity / speech rules / Eridian lore /
 behavior engine / output contract). It depends ONLY on the growth stage, so for a
 given stage the bytes are identical every call. Byte stability matters twice:
   1. Ollama reuses the KV-cache for a byte-identical prompt prefix, so steady-state
-     turns re-ingest almost none of the prompt (measured via prompt_eval_count).
+     turns re-ingest almost none of the prompt (verified via prompt_eval_duration in
+     scripts/check_kv_reuse.py; prompt_eval_count reports total prompt size on 0.32.x
+     and cannot show reuse).
   2. Fine-tune evals are reproducible.
 
 The per-session digest (learned facts, open questions) is built separately and

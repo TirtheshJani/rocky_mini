@@ -109,11 +109,12 @@ The brain PC is on and reachable, Ollama is running, and the speech server is up
 - Fail: if the p50 blows the budget, the harness prints the per-stage breakdown; attack the
   largest stage. If KV reuse is not confirmed, the persona prefix is being re-ingested every
   turn; confirm `keep_alive=-1` and that the byte-stable prefix is unchanged.
-- Known result (2026-07-20): on Ollama 0.32.1 for Windows the check reports NO CLEAR REUSE
-  for both rocky:latest and stock qwen2.5, even with `OLLAMA_NUM_PARALLEL=1` verified in the
-  server process environment. The re-ingest is server-wide, not a config problem on our side.
-  The 2.5 s budget is still met without reuse (p50 total 1.75 s), so this is a watch item for
-  future Ollama releases, not a blocker.
+- Known result (2026-07-20, corrected same day): the first, count-based version of the check
+  reported NO CLEAR REUSE on Ollama 0.32.1 for Windows for both rocky:latest and stock
+  qwen2.5. That was a false negative: on 0.32.x `prompt_eval_count` reports the request's
+  total prompt size whether or not the prefix was cached. Judged by `prompt_eval_duration`,
+  turn 2 prefill runs at 14-17% of turn 1's for both models, so prefix reuse IS live and no
+  Ollama upgrade or config change is needed. check_kv_reuse.py now verdicts on duration.
 
 ## 12. M9 failure drills  [needs-robot]
 

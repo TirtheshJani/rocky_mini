@@ -60,6 +60,19 @@ Needs TJ's machine (documented in docs/tutorial.md and docs/bring-up.md):
   `scripts/check_kv_reuse.py` verdict. These produce the honest latency figures the
   README still states as a budget.
 
+## Brain server runtime notes (2026-07-20)
+
+- Ollama 0.32.1 runs as a plain `ollama serve` process started in a terminal; the tray
+  app never bound port 11434 on this PC. Verify with `curl localhost:11434/api/version`
+  before a session.
+- KV prefix reuse IS live on 0.32.1 (corrected finding, same day as the wrong negative):
+  `prompt_eval_count` on 0.32.x reports total prompt size, cached or not, so only
+  `prompt_eval_duration` proves reuse. scripts/check_kv_reuse.py now verdicts on duration
+  (14-17% turn-2 prefill ratio on both rocky:latest and stock qwen2.5).
+- Eval-gate scores are repeatable within one server process only; the stock baseline has
+  scored 1/20 and 16/20 naivety leaks in different server sessions. A/B comparisons must
+  come from a single eval.py invocation (which is how --baseline works).
+
 ## Footgun reminders
 
 See CLAUDE.md. Most load-bearing: one set_target owner, one push_audio_sample owner,

@@ -40,7 +40,9 @@ The robot is a thin client. The PC does the thinking. On the PC (Windows 11, RTX
 ```bash
 # 3a. Ollama and the model
 ollama pull qwen2.5:7b-instruct-q5_K_M          # about 5.5 GB, fits 16 GB VRAM
-ollama serve                                     # or the Windows service; leave it running
+ollama serve                                     # in a terminal; leave it running
+#   note (2026-07-20): on this PC the Ollama tray app never bound port 11434, so start
+#   the server with `ollama serve` and verify with `curl http://localhost:11434/api/version`
 
 # 3b. The speech server (STT + TTS)
 pip install -r server/requirements.txt           # faster-whisper + Piper

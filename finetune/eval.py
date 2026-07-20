@@ -8,7 +8,14 @@ Scores a model on the axes that decide whether a LoRA ships:
   5. General-capability regression: it must not lose much ordinary ability vs the baseline.
 
 A LoRA ships only if it beats the stock baseline on 1 to 3, passes the memorization probe,
-and stays within the capability band. Runnable:
+and stays within the capability band.
+
+Determinism scope (measured 2026-07-20): temperature 0 and a fixed seed make scores
+repeatable within one Ollama server process, but NOT across server restarts; the same
+stock baseline has scored 1/20 and 16/20 naivety leaks in different server sessions.
+The A/B gate stays valid because --baseline scores candidate and baseline in the same
+invocation against the same server process. Do not compare absolute numbers from
+different sessions. Runnable:
 
   python finetune/eval.py --sim                                        # SimResponder demo
   python finetune/eval.py --model rocky:latest                         # score one live model

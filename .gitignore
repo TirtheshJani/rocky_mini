@@ -46,3 +46,6 @@ outputs/
 *.onnx.json
 unsloth_compiled_cache/
 rocky_mini/unsloth_compiled_cache/
+
+# reference material kept local, never distributed (decisions.md 14)
+docs/*.pdf

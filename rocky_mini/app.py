@@ -32,6 +32,7 @@ from .motion.manager import MovementManager
 from .sim_brain import SimResponder
 from .speech.tts import FakeTTS
 from .turn import ConversationLoop, TurnMetrics, build_profile
+from .vision import FakeVisionObserver, OllamaVisionObserver
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -81,6 +82,8 @@ class AppState:
     fired_emotes: list[str] = field(default_factory=list)
     # Set on the hardware path (main._run_hardware) so Phase 6 can reach latest_jpeg.
     vision: object | None = None
+    # The look-around observer (Fake in sim, Ollama vision on the real brain).
+    vision_observer: object | None = None
     _subscribers: list[asyncio.Queue] = field(default_factory=list)
 
     @classmethod
@@ -96,11 +99,20 @@ class AppState:
             ring_mix=settings.ring_mix,
         )
         motion = MovementManager(idle_glance_s=settings.idle_glance_s, rng=random.Random(0))
+        # Local vision (footgun 8): Ollama vision model on the real brain, Fake in sim.
+        observer = (
+            OllamaVisionObserver(base_url=settings.llm_base_url, model=settings.vision_model)
+            if settings.llm_backend == "ollama"
+            else FakeVisionObserver()
+        )
         handlers = {
             "remember_fact": lambda a: memory.remember_fact(a.category, a.fact, a.source_quote),
             "note_open_question": lambda a: memory.note_open_question(a.question),
             "confirm_fact": lambda a: memory.confirm_fact(a.id),
             "set_sleep_watch": lambda a: _sleep_handler(motion, a.on),
+            # state and observer are captured; the handler runs during a turn, after
+            # state exists (and after main._run_hardware populates state.vision).
+            "look_around": lambda a: _look_handler(state, observer, a.question),
         }
         state = cls(
             settings=settings,
@@ -110,6 +122,7 @@ class AppState:
             loop=None,  # set below
             reflection=ReflectionWorker(),
         )
+        state.vision_observer = observer
         loop = ConversationLoop(
             llm=_build_llm(settings),
             tts=FakeTTS(sample_rate=settings.sample_rate_out),
@@ -120,6 +133,13 @@ class AppState:
             curiosity=CuriosityScheduler(),
             chords=ChordBank(sample_rate=settings.sample_rate_out),
             emote_sink=state._on_emote,
+            # Spontaneous curious glance only on the real brain, so sim/tests are
+            # unchanged (observe stays None with llm_backend == "fake").
+            observe=(
+                (lambda: _look_handler(state, observer, ""))
+                if settings.llm_backend == "ollama"
+                else None
+            ),
         )
         state.loop = loop
         return state
@@ -159,6 +179,16 @@ class AppState:
 def _sleep_handler(motion: MovementManager, on: bool) -> str:
     motion.set_sleep_watch(on)
     return "on" if on else "off"
+
+
+def _look_handler(state: "AppState", observer: object, question: str) -> str:
+    """Read the latest camera JPEG (None in sim) and observe it. Never raises here.
+
+    state.vision is the VisionThread on hardware (set in main._run_hardware) and None
+    in sim, where the observer returns its in-character "no reading" for a None frame.
+    """
+    jpeg = state.vision.get_jpeg() if state.vision is not None else None
+    return observer.observe(jpeg, question)
 
 
 # -- request models --------------------------------------------------------

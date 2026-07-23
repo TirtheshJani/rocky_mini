@@ -1,4 +1,4 @@
-"""The four tools Rocky can call, pydantic-validated.
+"""The tools Rocky can call, pydantic-validated.
 
 A 7B is a flaky tool-caller, so every tool-call payload is validated against a pydantic
 model before it runs. Malformed calls raise ToolCallError; the LLM layer retries once
@@ -33,9 +33,14 @@ class SetSleepWatchArgs(BaseModel):
     on: bool
 
 
+class LookAroundArgs(BaseModel):
+    question: str = ""
+
+
 # Sorted by name (the plan requires deterministic tool ordering).
 TOOL_MODELS: dict[str, type[BaseModel]] = {
     "confirm_fact": ConfirmFactArgs,
+    "look_around": LookAroundArgs,
     "note_open_question": NoteOpenQuestionArgs,
     "remember_fact": RememberFactArgs,
     "set_sleep_watch": SetSleepWatchArgs,
@@ -43,6 +48,8 @@ TOOL_MODELS: dict[str, type[BaseModel]] = {
 
 _TOOL_DESCRIPTIONS = {
     "confirm_fact": "Mark a previously-heard fact as confirmed once TJ restates it.",
+    "look_around": "Read the room with Rocky's camera instrument and describe what is in "
+    "front of you. Use when curious about the surroundings.",
     "note_open_question": "Record something Rocky is curious about and wants to ask later.",
     "remember_fact": "Store a durable Earth fact TJ just taught, with the source quote.",
     "set_sleep_watch": "Enter or leave sleep-watch mode (watch over TJ while he rests).",

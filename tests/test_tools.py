@@ -3,6 +3,7 @@
 import pytest
 
 from rocky_mini.brain.tools import (
+    LookAroundArgs,
     RememberFactArgs,
     ToolCallError,
     ToolExecutor,
@@ -40,11 +41,34 @@ def test_bad_json_raises():
         parse_tool_call("note_open_question", "{not json")
 
 
-def test_tool_specs_are_the_four_sorted():
+def test_tool_specs_are_the_five_sorted():
     specs = tool_specs()
     names = [s["function"]["name"] for s in specs]
     assert names == sorted(names)
-    assert names == ["confirm_fact", "note_open_question", "remember_fact", "set_sleep_watch"]
+    assert names == [
+        "confirm_fact",
+        "look_around",
+        "note_open_question",
+        "remember_fact",
+        "set_sleep_watch",
+    ]
+
+
+def test_parse_look_around_empty_ok():
+    # Default question is "" so an empty payload validates.
+    args = parse_tool_call("look_around", "{}")
+    assert isinstance(args, LookAroundArgs)
+    assert args.question == ""
+
+
+def test_parse_look_around_with_question():
+    args = parse_tool_call("look_around", {"question": "what do you see"})
+    assert args.question == "what do you see"
+
+
+def test_look_around_bad_payload_type_raises():
+    with pytest.raises(ToolCallError):
+        parse_tool_call("look_around", {"question": ["not", "a", "string"]})
 
 
 def test_executor_dispatches_to_handler():

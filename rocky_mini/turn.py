@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import wave
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -115,6 +116,7 @@ class ConversationLoop:
         stt: STT | None = None,
         fallback_tts: TTS | None = None,
         emote_sink: Callable[[str], None] | None = None,
+        observe: Callable[[], str] | None = None,
         clock: Callable[[], float] = perf_counter,
     ) -> None:
         self.llm = llm
@@ -128,6 +130,9 @@ class ConversationLoop:
         self.stt = stt
         self.fallback_tts = fallback_tts
         self.emote_sink = emote_sink
+        # Optional spontaneous curious glance (real brain only; None in sim/tests).
+        self.observe = observe
+        self._obs_rng = random.Random(0)
         self.clock = clock
         self._tts_down = False  # per-turn: first TTS failure plays a canned clip, rest skip
         # Clean emote voice clips (Mixer adds ring mod at playout). Empty in sim.
@@ -219,6 +224,20 @@ class ConversationLoop:
             )
 
         metrics.t_done = self.clock()
+        # Optional spontaneous curious glance: on a proactive turn, Rocky sometimes
+        # reads the room with his camera instrument and carries what he saw into the
+        # next turn. Done AFTER t_done so the vision call never inflates reported
+        # latency (footgun 7), and wrapped so a glance can never break a turn.
+        if self.observe is not None and proactive and self._obs_rng.random() < 0.25:
+            try:
+                obs = self.observe()
+            except Exception:  # noqa: BLE001 - a glance must never break a turn
+                logger.exception("curious glance failed")
+                obs = ""
+            if obs:
+                self._pending_system.append(
+                    f"You glanced around with your camera instrument and saw: {obs}"
+                )
         self.state = SLEEPWATCH if self.sleep_watch else IDLE
         return TurnResult(
             reply=reply,

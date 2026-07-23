@@ -21,6 +21,7 @@ from .camera import (
     ReachyCamera,
     normalized_center_from_bbox,
 )
+from .observe import FakeVisionObserver, OllamaVisionObserver, VisionObserver
 from .thread import VisionThread, gaze_from_uv
 
 __all__ = [
@@ -34,4 +35,7 @@ __all__ = [
     "normalized_center_from_bbox",
     "VisionThread",
     "gaze_from_uv",
+    "VisionObserver",
+    "FakeVisionObserver",
+    "OllamaVisionObserver",
 ]

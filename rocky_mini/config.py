@@ -71,6 +71,14 @@ class Settings(BaseSettings):
     idle_curiosity_s: float = 20.0
     idle_glance_s: float = 180.0  # motion: mean gap between idle glances/emotes during silence.
 
+    # Vision (Phase 5, decision 18): client-side face tracking that feeds gaze only.
+    vision_enabled: bool = True  # ROCKY_VISION_ENABLED=0 -> DoA-only (reversal path).
+    vision_backend: str = "fake"  # "reachy" | "fake"
+    face_detector: str = "fake"  # "daemon" | "haar" | "fake"
+    vision_model: str = "qwen2.5vl:7b"  # look-around tool model (consumed in Phase 6).
+    gaze_h_fov_deg: float = 70.0  # camera horizontal FoV mapped to yaw offset.
+    gaze_v_fov_deg: float = 42.0  # camera vertical FoV mapped to pitch offset.
+
     # UI.
     ui_host: str = "0.0.0.0"
     ui_port: int = 8042

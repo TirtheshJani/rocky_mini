@@ -175,16 +175,65 @@ class RockyMiniApp(_BaseApp):
             target=audio_in.run, args=(stop_event,),
             daemon=True, name="AudioInThread",
         )
+        # Vision (Phase 5, decision 18): client-side face tracking feeds gaze through
+        # MovementManager.set_gaze only (footgun 1); it never calls start_head_tracking
+        # (footgun 9 amended). Hardware-only and lazily imported so cv2/SDK stay out of
+        # the sim path. A missing camera or cv2 degrades to DoA-only, never a crash.
+        vision_thread = None
+        if self.settings.audio_backend == "reachy" and self.settings.vision_enabled:
+            try:
+                from .vision import (
+                    DaemonFaceDetector,
+                    FakeCamera,
+                    FakeDetector,
+                    HaarFaceDetector,
+                    ReachyCamera,
+                    VisionThread,
+                )
+
+                camera = (
+                    ReachyCamera(mini)
+                    if self.settings.vision_backend == "reachy"
+                    else FakeCamera()
+                )
+                if self.settings.face_detector == "daemon":
+                    detector = DaemonFaceDetector(mini)
+                elif self.settings.face_detector == "haar":
+                    detector = HaarFaceDetector()  # raises if cv2 is missing
+                else:
+                    detector = FakeDetector()
+                vision_thread = VisionThread(
+                    camera,
+                    detector,
+                    self.state.motion,
+                    h_fov_deg=self.settings.gaze_h_fov_deg,
+                    v_fov_deg=self.settings.gaze_v_fov_deg,
+                )
+                self.state.vision = vision_thread
+            except Exception:
+                logger.warning("vision disabled: camera/detector init failed", exc_info=True)
+                vision_thread = None
+
         aio_thread.start()
         motion_thread.start()
         pump_thread.start()
         audio_in_thread.start()
+        vision_worker = None
+        if vision_thread is not None:
+            vision_worker = threading.Thread(
+                target=vision_thread.run, args=(stop_event,),
+                daemon=True, name="VisionThread",
+            )
+            vision_worker.start()
         try:
             stop_event.wait()
         finally:
-            # Ordered shutdown (plan.md): audio in -> asyncio -> mixer drain ->
-            # motion neutral ramp -> close the device.
+            # Ordered shutdown (plan.md): vision -> audio in -> asyncio -> mixer drain
+            # -> motion neutral ramp -> close the device. Vision stops first so no stale
+            # gaze arrives during the motion neutral ramp.
             stop_event.set()
+            if vision_worker is not None:
+                vision_worker.join(timeout=1.0)  # missing camera never blocks shutdown
             audio_in_thread.join(timeout=1.0)
             aio.call_soon_threadsafe(aio.stop)
             aio_thread.join(timeout=2.0)

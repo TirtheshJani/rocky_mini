@@ -28,6 +28,12 @@ logger = logging.getLogger("rocky_mini.motion")
 LISTEN_ANTENNA_RAISE = 22.0
 # RMS floor above which feed_audio_rms counts as Rocky speaking (idle-timer activity).
 IDLE_RMS_FLOOR = 0.01
+# How long a face gaze stays authoritative after its last update before DoA resumes.
+GAZE_FRESH_S = 1.5
+# RMS floor above which Rocky counts as speaking (freezes the gaze anchor, decision 18).
+SPEAK_RMS_FLOOR = IDLE_RMS_FLOOR
+# How long the speaking flag holds after the last loud frame (mixer playout tail).
+SPEAK_HOLD_S = 0.3
 
 
 class MovementManager:
@@ -48,6 +54,13 @@ class MovementManager:
         self.idle = IdlePolicy(idle_glance_s, rng)
         self._primary_emote: tuple[Trajectory, float] | None = None  # (traj, start_t)
         self._reflex: tuple[str, float] | None = None  # (name, start_t)
+        # Client-side face gaze (decision 18): a (yaw_deg, pitch_deg) look offset fed
+        # by the VisionThread through set_gaze. A fresh gaze wins over DoA; while Rocky
+        # speaks the anchor is frozen so his gaze holds on the listener as he talks.
+        self._gaze: tuple[float, float] | None = None
+        self._gaze_t: float = -1e9
+        self.speaking = False
+        self._speaking_until = -1e9
 
     # -- inputs ------------------------------------------------------------
     def start_emote(self, name: str, t: float | None = None) -> None:
@@ -63,6 +76,24 @@ class MovementManager:
         if deg is not None:
             self.idle.note_activity(self.clock())
 
+    def set_gaze(self, yaw_deg: float | None, pitch_deg: float | None) -> None:
+        """Feed a face-gaze look offset from the VisionThread (footgun 1: only setter).
+
+        yaw_deg None clears the anchor, but NOT while Rocky is speaking: the anchor is
+        frozen during speech so his gaze holds on the listener even through detection
+        dropouts. A live value is likewise ignored while speaking; otherwise it becomes
+        the fresh anchor and counts as activity for the idle timer.
+        """
+        if yaw_deg is None:
+            if not self.speaking:
+                self._gaze = None
+            return
+        if self.speaking:
+            return
+        self._gaze = (yaw_deg, pitch_deg or 0.0)
+        self._gaze_t = self.clock()
+        self.idle.note_activity(self.clock())
+
     def set_sleep_watch(self, on: bool) -> None:
         self.sleep_watch = on
         self.idle.note_activity(self.clock())
@@ -73,9 +104,19 @@ class MovementManager:
             self.idle.note_activity(self.clock())
 
     def feed_audio_rms(self, rms: float, t: float | None = None) -> None:
-        self.wobble.feed(rms, self.clock() if t is None else t)
+        now = self.clock() if t is None else t
+        self.wobble.feed(rms, now)
         if rms > IDLE_RMS_FLOOR:
             self.idle.note_activity(self.clock())
+        if rms > SPEAK_RMS_FLOOR:
+            # Rocky is producing sound: freeze the gaze anchor for a short tail.
+            self.speaking = True
+            self._speaking_until = now + SPEAK_HOLD_S
+
+    def _expire_speaking(self) -> None:
+        """Drop the speaking flag once the hold window has elapsed (injected clock)."""
+        if self.speaking and self.clock() > self._speaking_until:
+            self.speaking = False
 
     # -- composition -------------------------------------------------------
     def _primary_target(self, t: float) -> Pose:
@@ -99,6 +140,7 @@ class MovementManager:
         return apply_deltas(base, deltas)
 
     def _secondary_deltas(self, t: float) -> list[dict]:
+        self._expire_speaking()
         deltas: list[dict] = [self.wobble.delta(t)]
         if self._reflex is not None:
             name, start = self._reflex
@@ -108,9 +150,25 @@ class MovementManager:
                 self._reflex = None
             else:
                 deltas.append(reflex_delta)
-        if self.doa_deg is not None and not self.sleep_watch:
-            # Head leads toward the sound; body follows more slowly (handled by the yaw clamp).
-            deltas.append({"head_yaw": 0.6 * self.doa_deg, "body_yaw": 0.2 * self.doa_deg})
+        if not self.sleep_watch:
+            # Gaze/DoA reconciliation (decision 18): a fresh face wins over DoA. While
+            # Rocky speaks the anchor is always fresh (frozen); otherwise it stays fresh
+            # for GAZE_FRESH_S after its last update. With no fresh gaze, fall back to DoA.
+            gaze_fresh = self._gaze is not None and (
+                self.speaking or (self.clock() - self._gaze_t) < GAZE_FRESH_S
+            )
+            if gaze_fresh:
+                gaze_yaw, gaze_pitch = self._gaze
+                deltas.append(
+                    {
+                        "head_yaw": 0.6 * gaze_yaw,
+                        "body_yaw": 0.2 * gaze_yaw,
+                        "head_pitch": 0.5 * gaze_pitch,
+                    }
+                )
+            elif self.doa_deg is not None:
+                # Head leads toward the sound; body follows more slowly (yaw clamp).
+                deltas.append({"head_yaw": 0.6 * self.doa_deg, "body_yaw": 0.2 * self.doa_deg})
         return deltas
 
     def tick(self, t: float, dt: float) -> Pose:

@@ -79,6 +79,8 @@ class AppState:
     reflection: ReflectionWorker
     last_metrics: TurnMetrics | None = None
     fired_emotes: list[str] = field(default_factory=list)
+    # Set on the hardware path (main._run_hardware) so Phase 6 can reach latest_jpeg.
+    vision: object | None = None
     _subscribers: list[asyncio.Queue] = field(default_factory=list)
 
     @classmethod

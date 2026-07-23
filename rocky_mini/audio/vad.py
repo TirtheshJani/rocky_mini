@@ -49,9 +49,16 @@ class FakeVAD:
 
 
 class SileroVAD:
-    """Silero VAD via onnxruntime. 512-sample frames at 16 kHz only."""
+    """Silero VAD via onnxruntime. 256-sample frames at 16 kHz only.
 
-    frame_samples = 512
+    The vendored silero_vad.onnx expects 256-sample windows: fed 512, the LSTM
+    runs without error but returns a near-zero probability for real speech (the
+    model is effectively blind), so voice input never triggers. Verified on the
+    robot against clean 16 kHz TTS speech: at 256 frac(prob>0.6)=0.63 (tracks the
+    utterance), at 512 it is 0.01. Do not raise this back to 512.
+    """
+
+    frame_samples = 256
 
     def __init__(self, rate: int = 16000, model_path: Path | None = None) -> None:
         if rate != 16000:

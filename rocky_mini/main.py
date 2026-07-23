@@ -92,6 +92,22 @@ class RockyMiniApp(_BaseApp):
         if self.settings.audio_backend == "reachy":
             io = ReachyMediaIO(mini)  # raises if the SDK surface is missing
             vad = SileroVAD(rate=self.settings.sample_rate_in)
+            # AppState.build wires the loop with Fakes for the sim/text-chat path
+            # (FakeTTS, no STT). A hardware voice turn needs the real brain-server
+            # speech clients, so swap them in here or handle_voice_turn raises
+            # "no STT configured" and TTS stays silent.
+            from .speech.stt import RemoteSTT
+            from .speech.tts import RemoteTTS
+
+            self.state.loop.stt = RemoteSTT(
+                base_url=self.settings.speech_base_url,
+                token=self.settings.lan_token,
+            )
+            self.state.loop.tts = RemoteTTS(
+                base_url=self.settings.speech_base_url,
+                sample_rate=self.settings.sample_rate_out,
+                token=self.settings.lan_token,
+            )
         else:  # dev against a sim daemon: fake/sounddevice audio, real motion
             io = make_audio_io(self.settings.audio_backend)
             vad = FakeVAD()
@@ -107,12 +123,28 @@ class RockyMiniApp(_BaseApp):
 
         def on_speech(seg: SpeechSegment) -> None:
             # t_start = last voiced frame, so the 0.6 s hangover counts (footgun 7).
-            asyncio.run_coroutine_threadsafe(
+            logger.info(
+                "voice turn: %d samples at %d Hz (%.2f s)",
+                seg.pcm.size, seg.sample_rate, seg.pcm.size / max(1, seg.sample_rate),
+            )
+            fut = asyncio.run_coroutine_threadsafe(
                 self.state.loop.handle_voice_turn(
                     seg.pcm, seg.sample_rate, t_start=seg.t_last_voiced
                 ),
                 aio,
             )
+
+            def _log_turn_result(f) -> None:
+                # The turn runs on the asyncio loop; without this callback any
+                # exception (STT/LLM/TTS failure) is swallowed by the future and
+                # Rocky just goes quiet with no trace. Surface it.
+                try:
+                    res = f.result()
+                    logger.info("turn done: reply=%r", (res.reply or "")[:120])
+                except Exception:
+                    logger.exception("voice turn failed")
+
+            fut.add_done_callback(_log_turn_result)
 
         audio_in = AudioInThread(
             io=io,

@@ -208,7 +208,16 @@ class AudioInThread:
     def run(self, stop_event) -> None:  # pragma: no cover - thread loop, logic is step()
         logger.info("AudioInThread up (half_duplex=%s)", self.half_duplex)
         while not stop_event.is_set():
-            if not self.step():
+            # A transient hardware fault (e.g. a ReSpeaker USB glitch on a DoA or
+            # mic read) must degrade this tick, never kill the thread: a dead mic
+            # thread means Rocky goes permanently deaf with no error at all.
+            try:
+                progressed = self.step()
+            except Exception:
+                logger.exception("AudioInThread.step failed; continuing")
+                progressed = False
+                time.sleep(0.02)
+            if not progressed:
                 time.sleep(0.005)
 
     # -- internals -----------------------------------------------------------

@@ -54,6 +54,9 @@ class Settings(BaseSettings):
 
     # Voice DSP (Eridian ring modulation).
     ring_carrier_hz: float = 140.0
+    # Movie Rocky: mostly natural deadpan computer voice with a light metallic
+    # edge, not a fully ring-modulated robot. 0.0 = clean voice, 1.0 = full alien.
+    ring_mix: float = 0.2
     underlay_db: float = -12.0
 
     # Conversation timing.

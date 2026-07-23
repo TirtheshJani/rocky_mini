@@ -96,8 +96,10 @@ class RockyMiniApp(_BaseApp):
             # (FakeTTS, no STT). A hardware voice turn needs the real brain-server
             # speech clients, so swap them in here or handle_voice_turn raises
             # "no STT configured" and TTS stays silent.
+            from pathlib import Path
+
             from .speech.stt import RemoteSTT
-            from .speech.tts import RemoteTTS
+            from .speech.tts import CannedTTS, RemoteTTS
 
             self.state.loop.stt = RemoteSTT(
                 base_url=self.settings.speech_base_url,
@@ -108,6 +110,10 @@ class RockyMiniApp(_BaseApp):
                 sample_rate=self.settings.sample_rate_out,
                 token=self.settings.lan_token,
             )
+            # In-character "brain unreachable" clips. The working tree ships
+            # assets/canned at the repo root, one level above the package.
+            canned_dir = Path(__file__).resolve().parent.parent / "assets" / "canned"
+            self.state.loop.fallback_tts = CannedTTS(canned_dir)
         else:  # dev against a sim daemon: fake/sounddevice audio, real motion
             io = make_audio_io(self.settings.audio_backend)
             vad = FakeVAD()

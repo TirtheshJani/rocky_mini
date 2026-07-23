@@ -131,3 +131,77 @@ async def test_ack_fires_before_speaking(tmp_path):
     assert result.metrics.ack_ms is not None
     # Ack chord was queued to the mixer before any voice.
     assert mixer.pending()
+
+
+class _BoomTTS:
+    """TTS that always fails, simulating an unreachable speech server."""
+
+    sample_rate = 22050
+
+    async def synthesize(self, text: str):
+        raise ConnectionError("speech server down")
+
+
+class _CountingCanned:
+    """Stands in for CannedTTS: records requested clips, returns real PCM."""
+
+    sample_rate = 22050
+
+    def __init__(self):
+        self.clips: list[str] = []
+
+    async def synthesize(self, clip: str):
+        import numpy as np
+
+        self.clips.append(clip)
+        return np.ones(220, dtype=np.float32) * 0.1
+
+
+@pytest.mark.asyncio
+async def test_tts_failure_plays_canned_fallback_and_survives(tmp_path):
+    loop, io, mixer, memory = build_loop(tmp_path, FakeReply(text="One. Two. Three."))
+    canned = _CountingCanned()
+    loop.tts = _BoomTTS()
+    loop.fallback_tts = canned
+    result = await loop.handle_text_turn("Hello Rocky")
+    # The turn completes, the canned clip played exactly once, loop is reusable.
+    assert result.reply == "One. Two. Three."
+    assert canned.clips == ["pc_asleep.wav"]
+    mixer.render()
+    assert len(io.pushed) > 0
+    assert loop.state in ("IDLE", "SLEEPWATCH")
+
+
+class _BoomSTT:
+    async def transcribe(self, audio, sample_rate: int) -> str:
+        raise ConnectionError("speech server down")
+
+
+@pytest.mark.asyncio
+async def test_stt_failure_returns_empty_turn_with_canned_clip(tmp_path):
+    import numpy as np
+
+    loop, io, mixer, memory = build_loop(tmp_path, FakeReply(text="unused"))
+    canned = _CountingCanned()
+    loop.stt = _BoomSTT()
+    loop.fallback_tts = canned
+    result = await loop.handle_voice_turn(np.zeros(1600, dtype=np.float32), 16000)
+    assert result.reply == ""
+    assert canned.clips == ["cannot_reach.wav"]
+
+
+class _BoomLLM:
+    async def stream(self, messages):
+        raise ConnectionError("ollama down")
+        yield  # pragma: no cover - makes this an async generator
+
+@pytest.mark.asyncio
+async def test_llm_failure_plays_signal_bad_and_survives(tmp_path):
+    loop, io, mixer, memory = build_loop(tmp_path, FakeReply(text="unused"))
+    canned = _CountingCanned()
+    loop.llm = _BoomLLM()
+    loop.fallback_tts = canned
+    result = await loop.handle_text_turn("Hello Rocky")
+    assert result.reply == ""
+    assert canned.clips == ["signal_bad.wav"]
+    assert loop.state in ("IDLE", "SLEEPWATCH")

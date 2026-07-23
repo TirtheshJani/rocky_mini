@@ -71,3 +71,27 @@ def test_ring_mod_path_runs():
     assert len(out) == len(tone)
     # Ring modulation changed the signal.
     assert not np.allclose(out, tone)
+
+
+def test_ring_mix_blends_wet_and_dry():
+    import numpy as np
+
+    from rocky_mini.audio.io import FakeAudioIO
+    from rocky_mini.audio.output import Mixer
+
+    pcm = np.sin(2 * np.pi * 440 * np.arange(2205) / 22050).astype(np.float32) * 0.5
+    outs = {}
+    for mix in (0.0, 0.2, 1.0):
+        io = FakeAudioIO()
+        m = Mixer(io, frame=320, sample_rate=22050, ring_mix=mix)
+        m.push_voice(pcm.copy(), generation=0)
+        outs[mix] = m.render()
+    # mix=0.0 passes the voice through untouched; mix=1.0 is the old full ring mod;
+    # mix=0.2 must be the exact linear blend of the two (soft clip is monotonic but
+    # near-linear at this level, so compare pre-clip identity via the blend of outputs
+    # being closer to dry than wet).
+    assert np.allclose(outs[0.0], np.tanh(pcm), atol=1e-6)
+    assert not np.allclose(outs[1.0], outs[0.0])
+    d_dry = float(np.mean(np.abs(outs[0.2] - outs[0.0])))
+    d_wet = float(np.mean(np.abs(outs[0.2] - outs[1.0])))
+    assert d_dry < d_wet

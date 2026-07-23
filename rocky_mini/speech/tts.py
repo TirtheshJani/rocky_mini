@@ -61,6 +61,10 @@ class CannedTTS:
         with wave.open(str(path), "rb") as w:
             frames = w.readframes(w.getnframes())
             arr = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+            if w.getnchannels() > 1:
+                arr = arr.reshape(-1, w.getnchannels()).mean(axis=1).astype(np.float32)
+            # Report the file's true rate so the Mixer resamples correctly.
+            self.sample_rate = w.getframerate()
         return arr
 
     async def synthesize(self, text: str) -> np.ndarray:

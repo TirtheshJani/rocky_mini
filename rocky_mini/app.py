@@ -90,6 +90,7 @@ class AppState:
             frame=settings.mixer_frame,
             ring_carrier_hz=settings.ring_carrier_hz,
             sample_rate=settings.sample_rate_out,
+            ring_mix=settings.ring_mix,
         )
         motion = MovementManager()
         handlers = {

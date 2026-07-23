@@ -115,3 +115,25 @@ Format: date | decision | reasoning | reversal condition.
     quantization mismatch between the adapter's base and the served base gives erratic
     results; merging sidesteps it. Reversal: adopt the ADAPTER directive path only if
     swappable per-character adapters are needed, and then pair it with a full-precision base.
+
+16. **(2026-07-22) Rocky's voice and mannerisms align to the film, not the book's raw telegraphic stage.**
+    The Project Hail Mary film gives Rocky a deadpan, slightly degraded computer-voice-box
+    delivery (James Ortiz; "a little Mr. Moviefone, a little Siri, only not as clean") over
+    earnest, understandable sentences. Three changes: (a) the persona now frames the flat
+    voice as Rocky's translator box, keeps the tics (', question?', triple repeat, 'Amaze.',
+    'Thank.') and adds a worked introduction example so "introduce yourself" cannot collapse
+    into catchphrases; (b) the Mixer ring mod gained a wet/dry `ring_mix` (default 0.2), so
+    the voice is mostly natural with a metallic edge instead of unintelligible sidebands;
+    (c) the speech server flattens Piper prosody (noise_scale 0.3, noise_w 0.4, length_scale
+    1.05, env-overridable) for the deadpan read. The LoRA `rocky:latest` was trained on the
+    old telegraphic persona and overfits catchphrases; until it is retrained on the new
+    prompt, `ROCKY_MODEL=qwen2.5:7b-instruct` is the recommended robot setting. Reversal:
+    if the softer ring mix loses the alien character on the robot speaker, raise
+    ROCKY_RING_MIX toward 0.4; if eval.py shows weaker tic adherence, tighten speech rules.
+
+17. **(2026-07-22) A brain-server failure degrades in character instead of going silent.**
+    ConversationLoop now guards STT, LLM streaming, and per-chunk TTS; the first failure in
+    a turn plays a canned in-character WAV (assets/canned) via the previously unwired
+    CannedTTS, and the loop stays alive for the next utterance. Reasoning: on hardware the
+    only failure surface was a logged exception; Rocky appearing to die whenever the PC
+    slept was indistinguishable from a crash. Reversal: none; silence is never the right UX.

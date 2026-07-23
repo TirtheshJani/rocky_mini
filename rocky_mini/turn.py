@@ -16,6 +16,7 @@ any voice tagged with the now-stale generation, so interrupted speech stops at o
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Callable
@@ -31,6 +32,8 @@ from .brain.tools import ToolCallError, ToolExecutor
 from .memory.store import MemoryStore
 from .speech.stt import STT
 from .speech.tts import TTS
+
+logger = logging.getLogger("rocky_mini.turn")
 
 IDLE = "IDLE"
 THINKING = "THINKING"
@@ -105,6 +108,7 @@ class ConversationLoop:
         curiosity: CuriosityScheduler | None = None,
         chords: ChordBank | None = None,
         stt: STT | None = None,
+        fallback_tts: TTS | None = None,
         emote_sink: Callable[[str], None] | None = None,
         clock: Callable[[], float] = perf_counter,
     ) -> None:
@@ -117,8 +121,10 @@ class ConversationLoop:
         self.curiosity = curiosity or CuriosityScheduler()
         self.chords = chords or ChordBank(sample_rate=mixer.sample_rate)
         self.stt = stt
+        self.fallback_tts = fallback_tts
         self.emote_sink = emote_sink
         self.clock = clock
+        self._tts_down = False  # per-turn: first TTS failure plays a canned clip, rest skip
 
         self.generation = 0
         self.state = IDLE
@@ -131,7 +137,17 @@ class ConversationLoop:
     async def handle_voice_turn(self, audio, sample_rate: int, t_start: float | None = None) -> TurnResult:
         if self.stt is None:
             raise RuntimeError("no STT configured for voice turns")
-        user_text = await self.stt.transcribe(audio, sample_rate)
+        try:
+            user_text = await self.stt.transcribe(audio, sample_rate)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Brain server unreachable or STT died. Say so in character instead of
+            # going silent, and keep the loop alive for the next utterance.
+            logger.exception("STT failed; playing canned fallback")
+            await self._play_canned("cannot_reach.wav")
+            self.state = SLEEPWATCH if self.sleep_watch else IDLE
+            return TurnResult(reply="")
         return await self.handle_text_turn(user_text, t_start=t_start)
 
     async def handle_text_turn(self, user_text: str, t_start: float | None = None) -> TurnResult:
@@ -151,21 +167,31 @@ class ConversationLoop:
         tool_calls: list = []
 
         self.state = SPEAKING
-        async for ev in self.llm.stream(messages):
-            if ev.delta:
-                if metrics.t_first_token is None:
-                    metrics.t_first_token = self.clock()
-                reply_parts.append(ev.delta)
-                for chunk in chunker.feed(ev.delta):
-                    await self._speak_chunk(chunk, metrics)
-                    collected.append(chunk)
-            if ev.done:
-                metrics.prompt_eval_count = ev.prompt_eval_count
-                metrics.eval_count = ev.eval_count
-                tool_calls = ev.tool_calls
-        for chunk in chunker.flush():
-            await self._speak_chunk(chunk, metrics)
-            collected.append(chunk)
+        self._tts_down = False
+        try:
+            async for ev in self.llm.stream(messages):
+                if ev.delta:
+                    if metrics.t_first_token is None:
+                        metrics.t_first_token = self.clock()
+                    reply_parts.append(ev.delta)
+                    for chunk in chunker.feed(ev.delta):
+                        await self._speak_chunk(chunk, metrics)
+                        collected.append(chunk)
+                if ev.done:
+                    metrics.prompt_eval_count = ev.prompt_eval_count
+                    metrics.eval_count = ev.eval_count
+                    tool_calls = ev.tool_calls
+            for chunk in chunker.flush():
+                await self._speak_chunk(chunk, metrics)
+                collected.append(chunk)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # LLM stream died mid-turn (Ollama down, network drop). Keep whatever
+            # already played, say the signal is bad if nothing did, and stay alive.
+            logger.exception("LLM stream failed; degrading turn")
+            if not reply_parts:
+                await self._play_canned("signal_bad.wav")
 
         reply = "".join(reply_parts).strip()
         tool_results = self._run_tools(tool_calls, metrics)
@@ -227,8 +253,18 @@ class ConversationLoop:
             self._fire_chord(sfx)
         for emote in chunk.emotes:
             self._fire_emote(emote)
-        if chunk.text:
-            pcm = await self.tts.synthesize(chunk.text)
+        if chunk.text and not self._tts_down:
+            try:
+                pcm = await self.tts.synthesize(chunk.text)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Speech server unreachable: announce once in character, then stop
+                # trying for the rest of this turn (each attempt costs a timeout).
+                logger.exception("TTS failed; playing canned fallback")
+                self._tts_down = True
+                await self._play_canned("pc_asleep.wav")
+                return
             if pcm.size:
                 # src_rate lets the Mixer convert Piper's 22050 to the device rate
                 # once at the boundary (no-op when the rates already match).
@@ -237,6 +273,20 @@ class ConversationLoop:
                 )
                 if metrics.t_first_audio is None:
                     metrics.t_first_audio = self.clock()
+
+    async def _play_canned(self, clip: str) -> None:
+        """Best-effort in-character fallback audio; never raises."""
+        if self.fallback_tts is None:
+            return
+        try:
+            pcm = await self.fallback_tts.synthesize(clip)
+        except Exception:
+            logger.exception("canned fallback failed")
+            return
+        if pcm.size:
+            self.mixer.push_voice(
+                pcm, self.generation, src_rate=getattr(self.fallback_tts, "sample_rate", None)
+            )
 
     def _fire_chord(self, name: str) -> None:
         if name in STINGER_BANK:

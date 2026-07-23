@@ -11,6 +11,7 @@ Run:  uvicorn server.app:app --host 0.0.0.0 --port 8123
 from __future__ import annotations
 
 import io
+import os
 import wave
 
 import numpy as np
@@ -23,7 +24,14 @@ app = FastAPI(title="Rocky brain speech server", version="0.1.0")
 _WHISPER = None
 _PIPER = None
 WHISPER_SIZE = "small"
-PIPER_VOICE = "en_US-lessac-medium"
+PIPER_VOICE = os.environ.get("ROCKY_PIPER_VOICE", "en_US-lessac-medium")
+
+# Movie Rocky delivery: deadpan, slightly slow, low prosody variation. Piper's
+# noise_scale controls acoustic variation and noise_w controls phoneme-duration
+# variation; lowering both flattens the read toward a computer-voice-box sound.
+TTS_LENGTH_SCALE = float(os.environ.get("ROCKY_TTS_LENGTH_SCALE", "1.05"))
+TTS_NOISE_SCALE = float(os.environ.get("ROCKY_TTS_NOISE_SCALE", "0.3"))
+TTS_NOISE_W = float(os.environ.get("ROCKY_TTS_NOISE_W", "0.4"))
 
 
 def get_whisper():  # pragma: no cover - needs the model + GPU
@@ -57,6 +65,9 @@ async def health() -> JSONResponse:
             "tts_loaded": _PIPER is not None,
             "whisper_size": WHISPER_SIZE,
             "piper_voice": PIPER_VOICE,
+            "tts_length_scale": TTS_LENGTH_SCALE,
+            "tts_noise_scale": TTS_NOISE_SCALE,
+            "tts_noise_w": TTS_NOISE_W,
         }
     )
 
@@ -87,9 +98,29 @@ async def tts(body: TTSIn) -> Response:  # pragma: no cover - needs the voice
         # piper-tts >= 1.3 renamed the wav-writing entry point to synthesize_wav
         # (synthesize now yields raw AudioChunks and does not set wave params).
         if hasattr(voice, "synthesize_wav"):
-            voice.synthesize_wav(body.text, wav)
+            syn_config = None
+            try:
+                from piper import SynthesisConfig
+
+                syn_config = SynthesisConfig(
+                    length_scale=TTS_LENGTH_SCALE,
+                    noise_scale=TTS_NOISE_SCALE,
+                    noise_w_scale=TTS_NOISE_W,
+                )
+            except (ImportError, TypeError):
+                pass  # older 1.3.x without SynthesisConfig: default prosody
+            if syn_config is not None:
+                voice.synthesize_wav(body.text, wav, syn_config=syn_config)
+            else:
+                voice.synthesize_wav(body.text, wav)
         else:
-            voice.synthesize(body.text, wav)
+            voice.synthesize(
+                body.text,
+                wav,
+                length_scale=TTS_LENGTH_SCALE,
+                noise_scale=TTS_NOISE_SCALE,
+                noise_w=TTS_NOISE_W,
+            )
     buf.seek(0)
     with wave.open(buf, "rb") as wav:
         frames = wav.readframes(wav.getnframes())

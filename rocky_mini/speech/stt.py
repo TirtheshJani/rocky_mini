@@ -43,7 +43,8 @@ class RemoteSTT:
             import httpx
         except ImportError as exc:  # pragma: no cover - optional dep
             raise RuntimeError(
-                "httpx is not installed. Install with: pip install 'rocky_mini[llm]'"
+                "httpx is not installed. It is a core dependency; reinstall with: "
+                "pip install -e ."
             ) from exc
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         self._client = httpx.AsyncClient(base_url=base_url, timeout=timeout_s, headers=headers)

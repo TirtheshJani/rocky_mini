@@ -116,7 +116,8 @@ class OllamaLLM:
             from openai import AsyncOpenAI
         except ImportError as exc:  # pragma: no cover - optional dep
             raise RuntimeError(
-                "openai is not installed. Install with: pip install 'rocky_mini[llm]'"
+                "openai is not installed. It is a core dependency; reinstall with: "
+                "pip install -e ."
             ) from exc
         self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
         self._model = model

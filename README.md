@@ -46,7 +46,7 @@ growth stages) are in `rocky_mini/brain/`, `rocky_mini/memory/`, and `rocky_mini
 
 ```bash
 # Python >= 3.11
-pip install -e .           # core deps only: numpy, scipy, fastapi, uvicorn, pydantic
+pip install -e .           # core deps: numpy, scipy, fastapi, uvicorn, pydantic, openai, httpx, onnxruntime
 python -m rocky_mini.main --sim --host 127.0.0.1 --port 8042
 # open http://127.0.0.1:8042  -> teach Rocky, watch the fact table + metrics
 pytest -q                  # 164 tests
@@ -72,7 +72,8 @@ memory export.
    ROCKY_MODEL=qwen2.5:7b-instruct         # or rocky:latest once the LoRA is trained
    ROCKY_AUDIO_BACKEND=reachy
    ```
-3. **Robot app.** `pip install -e ".[robot,llm,vad]"`, then install to the Reachy dashboard
+3. **Robot app.** `pip install -e ".[robot]"` (the LLM/VAD deps are core, not extras),
+   then install to the Reachy dashboard
    (the `reachy_mini_apps` entry point). The daemon launches `RockyMiniApp` with a live
    `mini`; MotionThread and Mixer take over the hardware surfaces.
 4. **Rocky LoRA (optional, $0).** See `finetune/README.md` (WSL2 + Unsloth). Build the

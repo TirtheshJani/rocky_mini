@@ -116,6 +116,40 @@ Format: date | decision | reasoning | reversal condition.
     results; merging sidesteps it. Reversal: adopt the ADAPTER directive path only if
     swappable per-character adapters are needed, and then pair it with a full-precision base.
 
+## 2026-07-23
+
+18. **Footgun 9 amended: client-side vision is allowed; daemon head tracking is not.**
+    Rocky gains eyes (face tracking plus a look-around ability), a deliberate move away from
+    the book's eyeless echolocation to use the full Reachy Mini. The official Conversation App
+    does face tracking daemon-side via `mini.start_head_tracking()`, which lets the daemon
+    drive the head and would fight our single 100 Hz `set_target` owner (footgun 1). We do NOT
+    use it. Instead a new VisionThread (5 Hz, Protocol plus Fake, sim-first) captures frames
+    and detects a face, converts it to yaw/pitch, and feeds `MovementManager.set_gaze()`, a
+    setter parallel to `set_doa`. The manager reconciles gaze (fresh face wins) against DoA and
+    still emits exactly one `set_target` per tick. Persona keeps the alien register by framing
+    the camera as an instrument Rocky built, not organic sight. Reasoning: TJ wants the robot's
+    full utility with Rocky's mannerisms. Reversal: `ROCKY_VISION_ENABLED=0` (DoA-only) if the
+    VisionThread load degrades the motion loop or audio on the CM4, measured at bring-up.
+
+19. **Emotes are sampled from vendored Pollen recordings; sounds are Rocky's own voice.**
+    Movie-flavored emotes (amaze, happy, sad, scared, laugh, surprised, grateful, yes, no,
+    welcome, bored, sleep) reuse Pollen's `pollen-robotics/reachy-mini-emotions-library`
+    RecordedMove JSON trajectories, vendored into `assets/emotes/` by a dev-PC build script so
+    the robot needs no HuggingFace access. A `RecordedTrajectory` adapter SAMPLES them inside
+    MotionThread through our existing `Trajectory` interface; we never call the SDK `play_move`
+    (footgun 2). The recordings' own audio sidecars are discarded (generic robot voice); each
+    emote is paired with a short canned WAV rendered in Rocky's Piper voice plus ring mod, and
+    played through the Mixer VoiceBus with generation tagging (footgun 3), falling back to a
+    chord stinger when no WAV exists. Reasoning: TJ wants film-accurate emote sound, not the
+    library's generic voice. Reversal: none; this is the same sampling and single-owner audio
+    discipline as the rest of the motion and mixer code.
+
+20. **(pending probe P2) Local vision model for the look-around tool.** Default
+    `ROCKY_VISION_MODEL=qwen2.5vl:7b` served by the existing PC Ollama; `moondream` is the
+    lighter fallback if p50 latency on a 1280x720 JPEG exceeds roughly 8 s. To be confirmed by
+    timing both on the PC (10.0.0.95) once hardware is back; the measured choice replaces this
+    default here. Reversal: swap the env value; no code change needed.
+
 16. **(2026-07-22) Rocky's voice and mannerisms align to the film, not the book's raw telegraphic stage.**
     The Project Hail Mary film gives Rocky a deadpan, slightly degraded computer-voice-box
     delivery (James Ortiz; "a little Mr. Moviefone, a little Siri, only not as clean") over

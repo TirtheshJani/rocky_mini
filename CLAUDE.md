@@ -24,7 +24,13 @@ not style preferences.
    0.6 s VAD hangover. Do not quote latency from "after hangover".
 8. **No paid APIs.** The brain is Ollama / local models only. No `anthropic`, no
    `elevenlabs`, no cloud keys. `~/.rocky_mini/.env` holds only a LAN URL + token.
-9. **No face tracking, ever.** Rocky has no eyes (echolocates). Orient by DoA only.
+9. **Vision is client-side only.** Never call `mini.start_head_tracking()` (the daemon
+   would drive the head and fight footgun 1). Face tracking and camera capture run in our
+   own VisionThread; gaze reaches the head only via `MovementManager.set_gaze()`, which the
+   manager reconciles against DoA before the single per-tick `set_target`. In character,
+   vision is Rocky's engineered "camera instrument": the persona never claims biological
+   eyes. Kill switch: `ROCKY_VISION_ENABLED=0` falls back to DoA-only orientation. See
+   decision 18.
 10. **No em dashes** in code, comments, docstrings, or docs authored here.
 
 ## Architecture invariants

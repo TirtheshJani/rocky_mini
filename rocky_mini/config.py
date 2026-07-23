@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     half_duplex: bool = True  # open-mic barge-in off by default (no AEC on PC).
     max_proactive_per_n_turns: int = 3
     idle_curiosity_s: float = 20.0
+    idle_glance_s: float = 180.0  # motion: mean gap between idle glances/emotes during silence.
 
     # UI.
     ui_host: str = "0.0.0.0"

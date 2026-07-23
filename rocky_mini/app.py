@@ -9,6 +9,7 @@ SimResponder) so it runs with no robot, no Ollama, and no GPU.
 from __future__ import annotations
 
 import asyncio
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -92,7 +93,7 @@ class AppState:
             sample_rate=settings.sample_rate_out,
             ring_mix=settings.ring_mix,
         )
-        motion = MovementManager()
+        motion = MovementManager(idle_glance_s=settings.idle_glance_s, rng=random.Random(0))
         handlers = {
             "remember_fact": lambda a: memory.remember_fact(a.category, a.fact, a.source_quote),
             "note_open_question": lambda a: memory.note_open_question(a.question),

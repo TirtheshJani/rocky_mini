@@ -78,6 +78,11 @@ PRIMARY_EMOTES: dict[str, Trajectory] = {
         [(0.0, {}), (0.5, {"head_roll": 8.0, "head_yaw": 6.0}), (1.0, {"head_roll": 0.0, "head_yaw": 0.0})]
     ),
     "sleepy": Trajectory([(0.0, {}), (0.8, {"head_pitch": -10.0}), (1.5, {"head_pitch": -12.0})]),
+    # Idle liveliness: a gentle sonar-style head sweep that returns to center. Fired
+    # by IdlePolicy during long silences, blended over breathing like any primary emote.
+    "sweep_look": Trajectory(
+        [(0.0, {}), (0.8, {"head_yaw": 18.0}), (1.6, {"head_yaw": -18.0}), (2.4, {"head_yaw": 0.0})]
+    ),
 }
 
 # Vendored Pollen RecordedMove emotes: Rocky's vocabulary -> file stem under

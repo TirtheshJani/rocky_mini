@@ -190,6 +190,63 @@ async def test_stt_failure_returns_empty_turn_with_canned_clip(tmp_path):
     assert canned.clips == ["cannot_reach.wav"]
 
 
+def _write_tiny_wav(path, samples=220, rate=22050):
+    import wave
+
+    import numpy as np
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pcm16 = (np.ones(samples, dtype=np.float32) * 0.1 * 32767).astype(np.int16)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm16.tobytes())
+
+
+@pytest.mark.asyncio
+async def test_fire_emote_pushes_voice_clip_when_loaded(tmp_path):
+    from rocky_mini.speech.tts import CannedTTS
+
+    canned_root = tmp_path / "canned"
+    _write_tiny_wav(canned_root / "emotes" / "amaze.wav")
+    io = FakeAudioIO()
+    mixer = Mixer(io, sample_rate=22050)
+    memory = MemoryStore(tmp_path)
+    loop = ConversationLoop(
+        llm=FakeLLM(FakeReply(text="Amaze.")),
+        tts=FakeTTS(sample_rate=22050),
+        mixer=mixer,
+        memory=memory,
+        tools=ToolExecutor(handlers={}),
+        fallback_tts=CannedTTS(canned_root, sample_rate=22050),
+    )
+    # The clip was preloaded from canned_dir/emotes at construction.
+    assert "amaze" in loop._emote_sounds
+    pcm, rate = loop._emote_sounds["amaze"]
+    assert rate == 22050 and pcm.dtype.name == "float32" and pcm.size == 220
+
+    # Firing the emote queues a voice item tagged with the current generation.
+    assert not mixer.pending()
+    loop._fire_emote("amaze")
+    assert mixer.pending()
+    assert mixer._voice[-1].generation == loop.generation
+
+    # Firing an emote with no loaded clip pushes nothing extra.
+    n_before = len(mixer._voice)
+    loop._fire_emote("no_such_emote_clip")
+    assert len(mixer._voice) == n_before
+
+
+@pytest.mark.asyncio
+async def test_emote_sounds_empty_without_fallback_tts(tmp_path):
+    # Sim path: no fallback_tts means no clips, and emotes stay motion-only.
+    loop, io, mixer, memory = build_loop(tmp_path, FakeReply(text="Amaze."))
+    assert loop._emote_sounds == {}
+    loop._fire_emote("amaze")
+    assert not mixer.pending()
+
+
 class _BoomLLM:
     async def stream(self, messages):
         raise ConnectionError("ollama down")

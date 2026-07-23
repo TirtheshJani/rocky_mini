@@ -17,9 +17,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import wave
 from dataclasses import dataclass, field
+from pathlib import Path
 from time import perf_counter
 from typing import Callable
+
+import numpy as np
 
 from .audio.chords import STINGER_BANK, ChordBank
 from .audio.output import Mixer
@@ -30,6 +34,7 @@ from .brain.llm import LLM
 from .brain.persona import PersonaProfile, build_messages, stage_for_words
 from .brain.tools import ToolCallError, ToolExecutor
 from .memory.store import MemoryStore
+from .motion.emotes import ROCKY_EMOTES
 from .speech.stt import STT
 from .speech.tts import TTS
 
@@ -125,6 +130,8 @@ class ConversationLoop:
         self.emote_sink = emote_sink
         self.clock = clock
         self._tts_down = False  # per-turn: first TTS failure plays a canned clip, rest skip
+        # Clean emote voice clips (Mixer adds ring mod at playout). Empty in sim.
+        self._emote_sounds: dict[str, tuple[np.ndarray, int]] = self._load_emote_sounds()
 
         self.generation = 0
         self.state = IDLE
@@ -292,9 +299,48 @@ class ConversationLoop:
         if name in STINGER_BANK:
             self.mixer.push_chord(self.chords.render(name))
 
+    def _load_emote_sounds(self) -> dict[str, tuple[np.ndarray, int]]:
+        """Preload clean emote voice clips from the CannedTTS canned_dir/emotes.
+
+        Returns name -> (float32 mono PCM, framerate). On hardware fallback_tts is a
+        CannedTTS with a canned_dir; in sim it is None, so the dict stays empty and
+        emotes remain motion-only. A missing directory or file is skipped, not raised.
+        """
+        sounds: dict[str, tuple[np.ndarray, int]] = {}
+        canned_dir = getattr(self.fallback_tts, "canned_dir", None)
+        if canned_dir is None:
+            return sounds
+        emotes_dir = Path(canned_dir) / "emotes"
+        if not emotes_dir.is_dir():
+            return sounds
+        for name in ROCKY_EMOTES:
+            path = emotes_dir / f"{name}.wav"
+            if not path.exists():
+                continue
+            try:
+                with wave.open(str(path), "rb") as w:
+                    frames = w.readframes(w.getnframes())
+                    rate = w.getframerate()
+                    nchannels = w.getnchannels()
+                pcm = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+                if nchannels > 1:
+                    pcm = pcm.reshape(-1, nchannels).mean(axis=1).astype(np.float32)
+                sounds[name] = (pcm, rate)
+            except Exception:  # noqa: BLE001 - a bad clip must not break startup
+                logger.exception("failed to load emote clip %s", path)
+        logger.info("loaded %d emote voice clips", len(sounds))
+        return sounds
+
     def _fire_emote(self, name: str) -> None:
         if self.emote_sink is not None:
             self.emote_sink(name)
+        # Play the matching clean voice clip if one is loaded (Mixer ring-mods it at
+        # playout). Tagged with the current generation, so barge-in drops it. No
+        # stinger fallback here: callers pair _fire_emote with _fire_chord already.
+        clip = self._emote_sounds.get(name)
+        if clip is not None:
+            pcm, rate = clip
+            self.mixer.push_voice(pcm, self.generation, src_rate=rate)
 
     def _run_tools(self, tool_calls: list, metrics: TurnMetrics) -> list[tuple[str, str]]:
         results: list[tuple[str, str]] = []

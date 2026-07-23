@@ -11,9 +11,14 @@ Two kinds of emote:
 
 from __future__ import annotations
 
+import logging
 import math
+from pathlib import Path
 
 from .pose import FIELDS
+from .recorded import load_recorded
+
+logger = logging.getLogger("rocky_mini.motion")
 
 TWO_PI = 2.0 * math.pi
 
@@ -74,6 +79,47 @@ PRIMARY_EMOTES: dict[str, Trajectory] = {
     ),
     "sleepy": Trajectory([(0.0, {}), (0.8, {"head_pitch": -10.0}), (1.5, {"head_pitch": -12.0})]),
 }
+
+# Vendored Pollen RecordedMove emotes: Rocky's vocabulary -> file stem under
+# assets/emotes/. These load into PRIMARY_EMOTES alongside the procedural emotes
+# and are sampled the same way (never played through the SDK, footgun 2).
+ROCKY_EMOTES: dict[str, str] = {
+    "amaze": "amazed1",
+    "happy": "loving1",
+    "laugh": "laughing1",
+    "sad": "sad1",
+    "downcast": "downcast1",
+    "surprised": "surprised1",
+    "scared": "scared1",
+    "grateful": "grateful1",
+    "bored": "boredom1",
+    "yes": "yes1",
+    "no": "no1",
+    "welcome": "welcoming2",
+    "sleep": "sleep1",
+}
+
+# Same asset-path resolution as audio/vad.py: package_root / assets / emotes.
+_EMOTES_DIR = Path(__file__).parent.parent / "assets" / "emotes"
+
+
+def _load_recorded_emotes() -> None:
+    """Populate PRIMARY_EMOTES with the vendored RecordedMove emotes.
+
+    Files are vendored, deterministic, and offline. A missing or malformed file is
+    logged and skipped rather than raised, so the sim/test path stays green even on
+    a partial checkout.
+    """
+    for name, stem in ROCKY_EMOTES.items():
+        path = _EMOTES_DIR / f"{stem}.json"
+        try:
+            PRIMARY_EMOTES[name] = load_recorded(path)
+            logger.info("loaded recorded emote %s from %s", name, path)
+        except Exception as exc:  # noqa: BLE001 - keep import resilient (footgun: green tests)
+            logger.warning("skipping recorded emote %s (%s): %s", name, path, exc)
+
+
+_load_recorded_emotes()
 
 # Fast reflex emotes (additive, not blended).
 REFLEX_EMOTES = {"jazz_hands": jazz_hands_delta}

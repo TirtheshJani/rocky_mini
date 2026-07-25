@@ -17,6 +17,9 @@ from dataclasses import dataclass, field
 
 _ARTICLES = {"a", "an", "the"}
 
+# Tripling an awe word fires the movie "Amaze" emote instead of the generic reflex.
+_AWE_WORDS = {"amaze", "amazed", "wow", "whoa", "amazing"}
+
 # Assistant-isms to remove. Order matters (longer phrases first).
 _ASSISTANT_ISMS = [
     re.compile(r"\bas an ai(?: language model)?\b[,.:;]?\s*", re.IGNORECASE),
@@ -125,6 +128,21 @@ def _count_tripling(words: list[str]) -> int:
     return count
 
 
+def _tripled_words(words: list[str]) -> set[str]:
+    """Lowercased words that appear in a run of three or more in a row."""
+    tripled: set[str] = set()
+    i = 0
+    n = len(words)
+    while i < n:
+        j = i
+        while j < n and words[j].lower() == words[i].lower():
+            j += 1
+        if j - i >= 3:
+            tripled.add(words[i].lower())
+        i = max(j, i + 1)
+    return tripled
+
+
 def lint(text: str) -> LintResult:
     """Apply the deterministic tic pass and measure metrics."""
     text = _strip_assistant_isms(text)
@@ -148,7 +166,9 @@ def lint(text: str) -> LintResult:
 
     emotes: list[str] = []
     sfx: list[str] = []
-    if metrics.tripling_count > 0:
+    if _tripled_words(words) & _AWE_WORDS:
+        emotes.append("amaze")
+    elif metrics.tripling_count > 0:
         emotes.append("jazz_hands")
     if metrics.question_particle_hits > 0:
         sfx.append("question")

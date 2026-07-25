@@ -92,6 +92,28 @@ class RockyMiniApp(_BaseApp):
         if self.settings.audio_backend == "reachy":
             io = ReachyMediaIO(mini)  # raises if the SDK surface is missing
             vad = SileroVAD(rate=self.settings.sample_rate_in)
+            # AppState.build wires the loop with Fakes for the sim/text-chat path
+            # (FakeTTS, no STT). A hardware voice turn needs the real brain-server
+            # speech clients, so swap them in here or handle_voice_turn raises
+            # "no STT configured" and TTS stays silent.
+            from pathlib import Path
+
+            from .speech.stt import RemoteSTT
+            from .speech.tts import CannedTTS, RemoteTTS
+
+            self.state.loop.stt = RemoteSTT(
+                base_url=self.settings.speech_base_url,
+                token=self.settings.lan_token,
+            )
+            self.state.loop.tts = RemoteTTS(
+                base_url=self.settings.speech_base_url,
+                sample_rate=self.settings.sample_rate_out,
+                token=self.settings.lan_token,
+            )
+            # In-character "brain unreachable" clips. The working tree ships
+            # assets/canned at the repo root, one level above the package.
+            canned_dir = Path(__file__).resolve().parent.parent / "assets" / "canned"
+            self.state.loop.fallback_tts = CannedTTS(canned_dir)
         else:  # dev against a sim daemon: fake/sounddevice audio, real motion
             io = make_audio_io(self.settings.audio_backend)
             vad = FakeVAD()
@@ -107,12 +129,28 @@ class RockyMiniApp(_BaseApp):
 
         def on_speech(seg: SpeechSegment) -> None:
             # t_start = last voiced frame, so the 0.6 s hangover counts (footgun 7).
-            asyncio.run_coroutine_threadsafe(
+            logger.info(
+                "voice turn: %d samples at %d Hz (%.2f s)",
+                seg.pcm.size, seg.sample_rate, seg.pcm.size / max(1, seg.sample_rate),
+            )
+            fut = asyncio.run_coroutine_threadsafe(
                 self.state.loop.handle_voice_turn(
                     seg.pcm, seg.sample_rate, t_start=seg.t_last_voiced
                 ),
                 aio,
             )
+
+            def _log_turn_result(f) -> None:
+                # The turn runs on the asyncio loop; without this callback any
+                # exception (STT/LLM/TTS failure) is swallowed by the future and
+                # Rocky just goes quiet with no trace. Surface it.
+                try:
+                    res = f.result()
+                    logger.info("turn done: reply=%r", (res.reply or "")[:120])
+                except Exception:
+                    logger.exception("voice turn failed")
+
+            fut.add_done_callback(_log_turn_result)
 
         audio_in = AudioInThread(
             io=io,
@@ -137,16 +175,80 @@ class RockyMiniApp(_BaseApp):
             target=audio_in.run, args=(stop_event,),
             daemon=True, name="AudioInThread",
         )
+        # Vision (Phase 5, decision 18): client-side face tracking feeds gaze through
+        # MovementManager.set_gaze only (footgun 1); it never calls start_head_tracking
+        # (footgun 9 amended). Hardware-only and lazily imported so cv2/SDK stay out of
+        # the sim path. A missing camera or cv2 degrades to DoA-only, never a crash.
+        vision_thread = None
+        if self.settings.audio_backend == "reachy" and self.settings.vision_enabled:
+            try:
+                from .vision import (
+                    DaemonFaceDetector,
+                    FakeCamera,
+                    FakeDetector,
+                    HaarFaceDetector,
+                    ReachyCamera,
+                    VisionThread,
+                )
+
+                camera = (
+                    ReachyCamera(mini)
+                    if self.settings.vision_backend == "reachy"
+                    else FakeCamera()
+                )
+                if self.settings.face_detector == "daemon":
+                    detector = DaemonFaceDetector(mini)
+                elif self.settings.face_detector == "haar":
+                    detector = HaarFaceDetector()  # raises if cv2 is missing
+                else:
+                    detector = FakeDetector()
+                vision_thread = VisionThread(
+                    camera,
+                    detector,
+                    self.state.motion,
+                    h_fov_deg=self.settings.gaze_h_fov_deg,
+                    v_fov_deg=self.settings.gaze_v_fov_deg,
+                )
+                self.state.vision = vision_thread
+            except Exception:
+                logger.warning("vision disabled: camera/detector init failed", exc_info=True)
+                vision_thread = None
+
         aio_thread.start()
         motion_thread.start()
         pump_thread.start()
         audio_in_thread.start()
+        vision_worker = None
+        if vision_thread is not None:
+            vision_worker = threading.Thread(
+                target=vision_thread.run, args=(stop_event,),
+                daemon=True, name="VisionThread",
+            )
+            vision_worker.start()
+
+        if self.settings.wake_greeting_enabled:
+            # Rocky speaks first (official conversation app pattern). Fire-and-forget on
+            # the conversation loop; a failed greeting must never block startup.
+            def _log_greeting(f) -> None:
+                try:
+                    res = f.result()
+                    logger.info("wake greeting: %r", (res.reply or "")[:120])
+                except Exception:
+                    logger.exception("wake greeting failed")
+
+            greeting_fut = asyncio.run_coroutine_threadsafe(
+                self.state.loop.handle_wake_greeting(), aio
+            )
+            greeting_fut.add_done_callback(_log_greeting)
         try:
             stop_event.wait()
         finally:
-            # Ordered shutdown (plan.md): audio in -> asyncio -> mixer drain ->
-            # motion neutral ramp -> close the device.
+            # Ordered shutdown (plan.md): vision -> audio in -> asyncio -> mixer drain
+            # -> motion neutral ramp -> close the device. Vision stops first so no stale
+            # gaze arrives during the motion neutral ramp.
             stop_event.set()
+            if vision_worker is not None:
+                vision_worker.join(timeout=1.0)  # missing camera never blocks shutdown
             audio_in_thread.join(timeout=1.0)
             aio.call_soon_threadsafe(aio.stop)
             aio_thread.join(timeout=2.0)

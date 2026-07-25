@@ -14,12 +14,11 @@ harness therefore include the hangover.
 The spoken input is synthesized by the speech server's own /tts and fed back
 through /stt, so STT cost is measured on realistic speech, not beeps.
 
-KV-cache prefix reuse (footgun 4): the report prints prompt_eval_count per turn.
-With byte-stable persona + keep_alive=-1, turn 2 onward should ingest far fewer
-prompt tokens than turn 1. If the OpenAI-compat usage field reports the full
-prompt size on every turn instead, treat the number as inconclusive and compare
-turn 1 vs turn 2 first-token latency, then check Ollama's native /api/chat
-prompt_eval_count by hand before calling it a finding.
+KV-cache prefix reuse (footgun 4): the report prints prompt_eval_count per turn,
+but on Ollama 0.32.x that field reports the request's total prompt size whether or
+not the prefix was cached, so a flat count does NOT mean reuse is broken. The
+authoritative check is scripts/check_kv_reuse.py, which verdicts on the native
+/api/chat prompt_eval_duration (turn 2 prefill collapses on a cache hit).
 
 Memory writes go to a temp dir: a measurement run must not teach Rocky junk facts.
 """
@@ -101,13 +100,10 @@ async def tts_wav(client: httpx.AsyncClient, base_url: str, text: str) -> tuple[
     """Ask the speech server to speak the question, for feeding back into /stt."""
     r = await client.post(f"{base_url}/tts", json={"text": text}, timeout=60.0)
     r.raise_for_status()
-    import io
-    import wave
-
-    with wave.open(io.BytesIO(r.content)) as w:
-        rate = w.getframerate()
-        pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
-    return pcm.astype(np.float32) / 32768.0, rate
+    # The server returns raw int16 PCM frames (same contract as speech/tts.py's
+    # runtime client), not a WAV container. Piper medium voices run at 22050 Hz.
+    pcm = np.frombuffer(r.content, dtype=np.int16)
+    return pcm.astype(np.float32) / 32768.0, 22050
 
 
 def p50(xs: list[float]) -> float:
@@ -203,7 +199,11 @@ async def main() -> None:
     if len(pe) >= 2 and pe[0] > 0 and 0 < pe[1] < pe[0] * 0.5:
         print("KV-cache prefix reuse: LOOKS LIVE (turn 2 ingested far fewer prompt tokens)")
     else:
-        print("KV-cache prefix reuse: INCONCLUSIVE from usage counters; see docstring")
+        print(
+            "KV-cache prefix reuse: INCONCLUSIVE from usage counters (prompt_eval_count "
+            "reports total prompt size on 0.32.x); run scripts/check_kv_reuse.py for the "
+            "duration-based verdict"
+        )
 
 
 if __name__ == "__main__":

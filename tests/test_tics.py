@@ -41,6 +41,17 @@ def test_no_tripling_no_jazz_hands():
     assert "jazz_hands" not in r.emotes
 
 
+def test_awe_tripling_triggers_amaze():
+    r = lint("Amaze. Amaze. Amaze.")
+    assert r.metrics.tripling_count == 1
+    assert r.emotes == ["amaze"]
+
+
+def test_non_awe_tripling_still_jazz_hands():
+    r = lint("Good. Good. Good.")
+    assert r.emotes == ["jazz_hands"]
+
+
 def test_article_rate_measured():
     r = lint("The dog and a cat.")
     # "the" and "a" out of 5 words.

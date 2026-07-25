@@ -16,9 +16,15 @@ any voice tagged with the now-stale generation, so interrupted speech stops at o
 from __future__ import annotations
 
 import asyncio
+import logging
+import random
+import wave
 from dataclasses import dataclass, field
+from pathlib import Path
 from time import perf_counter
 from typing import Callable
+
+import numpy as np
 
 from .audio.chords import STINGER_BANK, ChordBank
 from .audio.output import Mixer
@@ -29,8 +35,11 @@ from .brain.llm import LLM
 from .brain.persona import PersonaProfile, build_messages, stage_for_words
 from .brain.tools import ToolCallError, ToolExecutor
 from .memory.store import MemoryStore
+from .motion.emotes import ROCKY_EMOTES
 from .speech.stt import STT
 from .speech.tts import TTS
+
+logger = logging.getLogger("rocky_mini.turn")
 
 IDLE = "IDLE"
 THINKING = "THINKING"
@@ -105,7 +114,9 @@ class ConversationLoop:
         curiosity: CuriosityScheduler | None = None,
         chords: ChordBank | None = None,
         stt: STT | None = None,
+        fallback_tts: TTS | None = None,
         emote_sink: Callable[[str], None] | None = None,
+        observe: Callable[[], str] | None = None,
         clock: Callable[[], float] = perf_counter,
     ) -> None:
         self.llm = llm
@@ -117,8 +128,15 @@ class ConversationLoop:
         self.curiosity = curiosity or CuriosityScheduler()
         self.chords = chords or ChordBank(sample_rate=mixer.sample_rate)
         self.stt = stt
+        self.fallback_tts = fallback_tts
         self.emote_sink = emote_sink
+        # Optional spontaneous curious glance (real brain only; None in sim/tests).
+        self.observe = observe
+        self._obs_rng = random.Random(0)
         self.clock = clock
+        self._tts_down = False  # per-turn: first TTS failure plays a canned clip, rest skip
+        # Clean emote voice clips (Mixer adds ring mod at playout). Empty in sim.
+        self._emote_sounds: dict[str, tuple[np.ndarray, int]] = self._load_emote_sounds()
 
         self.generation = 0
         self.state = IDLE
@@ -131,8 +149,30 @@ class ConversationLoop:
     async def handle_voice_turn(self, audio, sample_rate: int, t_start: float | None = None) -> TurnResult:
         if self.stt is None:
             raise RuntimeError("no STT configured for voice turns")
-        user_text = await self.stt.transcribe(audio, sample_rate)
+        try:
+            user_text = await self.stt.transcribe(audio, sample_rate)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Brain server unreachable or STT died. Say so in character instead of
+            # going silent, and keep the loop alive for the next utterance.
+            logger.exception("STT failed; playing canned fallback")
+            await self._play_canned("cannot_reach.wav")
+            self.state = SLEEPWATCH if self.sleep_watch else IDLE
+            return TurnResult(reply="")
         return await self.handle_text_turn(user_text, t_start=t_start)
+
+    async def handle_wake_greeting(self) -> TurnResult:
+        """Rocky speaks first when he wakes, like the official conversation app.
+
+        A greeting nudge rides _pending_system and the turn runs with no user message,
+        so nothing artificial enters the history. Sampling varies the wording.
+        """
+        self._pending_system.append(
+            "WAKE: You just woke up and TJ is near. Greet TJ briefly in character, one or "
+            "two short sentences, and invite conversation. Vary the wording every time."
+        )
+        return await self.handle_text_turn("")
 
     async def handle_text_turn(self, user_text: str, t_start: float | None = None) -> TurnResult:
         metrics = TurnMetrics(generation=self.generation)
@@ -151,21 +191,31 @@ class ConversationLoop:
         tool_calls: list = []
 
         self.state = SPEAKING
-        async for ev in self.llm.stream(messages):
-            if ev.delta:
-                if metrics.t_first_token is None:
-                    metrics.t_first_token = self.clock()
-                reply_parts.append(ev.delta)
-                for chunk in chunker.feed(ev.delta):
-                    await self._speak_chunk(chunk, metrics)
-                    collected.append(chunk)
-            if ev.done:
-                metrics.prompt_eval_count = ev.prompt_eval_count
-                metrics.eval_count = ev.eval_count
-                tool_calls = ev.tool_calls
-        for chunk in chunker.flush():
-            await self._speak_chunk(chunk, metrics)
-            collected.append(chunk)
+        self._tts_down = False
+        try:
+            async for ev in self.llm.stream(messages):
+                if ev.delta:
+                    if metrics.t_first_token is None:
+                        metrics.t_first_token = self.clock()
+                    reply_parts.append(ev.delta)
+                    for chunk in chunker.feed(ev.delta):
+                        await self._speak_chunk(chunk, metrics)
+                        collected.append(chunk)
+                if ev.done:
+                    metrics.prompt_eval_count = ev.prompt_eval_count
+                    metrics.eval_count = ev.eval_count
+                    tool_calls = ev.tool_calls
+            for chunk in chunker.flush():
+                await self._speak_chunk(chunk, metrics)
+                collected.append(chunk)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # LLM stream died mid-turn (Ollama down, network drop). Keep whatever
+            # already played, say the signal is bad if nothing did, and stay alive.
+            logger.exception("LLM stream failed; degrading turn")
+            if not reply_parts:
+                await self._play_canned("signal_bad.wav")
 
         reply = "".join(reply_parts).strip()
         tool_results = self._run_tools(tool_calls, metrics)
@@ -186,6 +236,29 @@ class ConversationLoop:
             )
 
         metrics.t_done = self.clock()
+        logger.info(
+            "turn done: ack=%sms first_audio=%ss total=%ss prompt_tokens=%d eval_tokens=%d tools=%d",
+            None if metrics.ack_ms is None else round(metrics.ack_ms),
+            None if metrics.time_to_first_audio_s is None else round(metrics.time_to_first_audio_s, 2),
+            None if metrics.total_s is None else round(metrics.total_s, 2),
+            metrics.prompt_eval_count,
+            metrics.eval_count,
+            metrics.tool_calls,
+        )
+        # Optional spontaneous curious glance: on a proactive turn, Rocky sometimes
+        # reads the room with his camera instrument and carries what he saw into the
+        # next turn. Done AFTER t_done so the vision call never inflates reported
+        # latency (footgun 7), and wrapped so a glance can never break a turn.
+        if self.observe is not None and proactive and self._obs_rng.random() < 0.25:
+            try:
+                obs = self.observe()
+            except Exception:  # noqa: BLE001 - a glance must never break a turn
+                logger.exception("curious glance failed")
+                obs = ""
+            if obs:
+                self._pending_system.append(
+                    f"You glanced around with your camera instrument and saw: {obs}"
+                )
         self.state = SLEEPWATCH if self.sleep_watch else IDLE
         return TurnResult(
             reply=reply,
@@ -219,7 +292,8 @@ class ConversationLoop:
             messages.append({"role": "system", "content": correction})
         self._pending_system = []
         messages.extend(self.history)
-        messages.append({"role": "user", "content": user_text})
+        if user_text:
+            messages.append({"role": "user", "content": user_text})
         return messages
 
     async def _speak_chunk(self, chunk: Chunk, metrics: TurnMetrics) -> None:
@@ -227,8 +301,18 @@ class ConversationLoop:
             self._fire_chord(sfx)
         for emote in chunk.emotes:
             self._fire_emote(emote)
-        if chunk.text:
-            pcm = await self.tts.synthesize(chunk.text)
+        if chunk.text and not self._tts_down:
+            try:
+                pcm = await self.tts.synthesize(chunk.text)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Speech server unreachable: announce once in character, then stop
+                # trying for the rest of this turn (each attempt costs a timeout).
+                logger.exception("TTS failed; playing canned fallback")
+                self._tts_down = True
+                await self._play_canned("pc_asleep.wav")
+                return
             if pcm.size:
                 # src_rate lets the Mixer convert Piper's 22050 to the device rate
                 # once at the boundary (no-op when the rates already match).
@@ -238,13 +322,66 @@ class ConversationLoop:
                 if metrics.t_first_audio is None:
                     metrics.t_first_audio = self.clock()
 
+    async def _play_canned(self, clip: str) -> None:
+        """Best-effort in-character fallback audio; never raises."""
+        if self.fallback_tts is None:
+            return
+        try:
+            pcm = await self.fallback_tts.synthesize(clip)
+        except Exception:
+            logger.exception("canned fallback failed")
+            return
+        if pcm.size:
+            self.mixer.push_voice(
+                pcm, self.generation, src_rate=getattr(self.fallback_tts, "sample_rate", None)
+            )
+
     def _fire_chord(self, name: str) -> None:
         if name in STINGER_BANK:
             self.mixer.push_chord(self.chords.render(name))
 
+    def _load_emote_sounds(self) -> dict[str, tuple[np.ndarray, int]]:
+        """Preload clean emote voice clips from the CannedTTS canned_dir/emotes.
+
+        Returns name -> (float32 mono PCM, framerate). On hardware fallback_tts is a
+        CannedTTS with a canned_dir; in sim it is None, so the dict stays empty and
+        emotes remain motion-only. A missing directory or file is skipped, not raised.
+        """
+        sounds: dict[str, tuple[np.ndarray, int]] = {}
+        canned_dir = getattr(self.fallback_tts, "canned_dir", None)
+        if canned_dir is None:
+            return sounds
+        emotes_dir = Path(canned_dir) / "emotes"
+        if not emotes_dir.is_dir():
+            return sounds
+        for name in ROCKY_EMOTES:
+            path = emotes_dir / f"{name}.wav"
+            if not path.exists():
+                continue
+            try:
+                with wave.open(str(path), "rb") as w:
+                    frames = w.readframes(w.getnframes())
+                    rate = w.getframerate()
+                    nchannels = w.getnchannels()
+                pcm = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+                if nchannels > 1:
+                    pcm = pcm.reshape(-1, nchannels).mean(axis=1).astype(np.float32)
+                sounds[name] = (pcm, rate)
+            except Exception:  # noqa: BLE001 - a bad clip must not break startup
+                logger.exception("failed to load emote clip %s", path)
+        logger.info("loaded %d emote voice clips", len(sounds))
+        return sounds
+
     def _fire_emote(self, name: str) -> None:
         if self.emote_sink is not None:
             self.emote_sink(name)
+        # Play the matching clean voice clip if one is loaded (Mixer ring-mods it at
+        # playout). Tagged with the current generation, so barge-in drops it. No
+        # stinger fallback here: callers pair _fire_emote with _fire_chord already.
+        clip = self._emote_sounds.get(name)
+        if clip is not None:
+            pcm, rate = clip
+            self.mixer.push_voice(pcm, self.generation, src_rate=rate)
 
     def _run_tools(self, tool_calls: list, metrics: TurnMetrics) -> list[tuple[str, str]]:
         results: list[tuple[str, str]] = []
@@ -260,8 +397,10 @@ class ConversationLoop:
         return results
 
     def _record_history(self, user_text: str, reply: str) -> None:
-        self.history.append({"role": "user", "content": user_text})
-        self.history.append({"role": "assistant", "content": reply})
+        if user_text:
+            self.history.append({"role": "user", "content": user_text})
+        if reply:
+            self.history.append({"role": "assistant", "content": reply})
         # Trim in large chunks so the KV-cache prefix (system messages) stays stable.
         if len(self.history) > _HISTORY_MAX:
             self.history = self.history[_HISTORY_TRIM:]

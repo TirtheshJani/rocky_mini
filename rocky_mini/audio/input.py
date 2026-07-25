@@ -188,6 +188,7 @@ class AudioInThread:
         self._pending = np.zeros(0, dtype=np.float32)
         self._last_doa_poll = float("-inf")
         self._doa_poll_s = doa_poll_s
+        self._listening = False
 
     def step(self) -> bool:
         """One unit of work. Returns True if input data was consumed."""
@@ -208,7 +209,16 @@ class AudioInThread:
     def run(self, stop_event) -> None:  # pragma: no cover - thread loop, logic is step()
         logger.info("AudioInThread up (half_duplex=%s)", self.half_duplex)
         while not stop_event.is_set():
-            if not self.step():
+            # A transient hardware fault (e.g. a ReSpeaker USB glitch on a DoA or
+            # mic read) must degrade this tick, never kill the thread: a dead mic
+            # thread means Rocky goes permanently deaf with no error at all.
+            try:
+                progressed = self.step()
+            except Exception:
+                logger.exception("AudioInThread.step failed; continuing")
+                progressed = False
+                time.sleep(0.02)
+            if not progressed:
                 time.sleep(0.005)
 
     # -- internals -----------------------------------------------------------
@@ -226,6 +236,13 @@ class AudioInThread:
                     self.on_barge_in()
             elif isinstance(event, SpeechSegment):
                 self.on_speech(event)
+        # Attentive perk: cue the motion thread to raise Rocky's antennas while the user
+        # is speaking, never while HE speaks. Fire only on a state change so the 100 Hz
+        # manager is not spammed; the manager owns the blend up and back down.
+        listening = self.gate.in_speech and not speaking
+        if listening != self._listening:
+            self._listening = listening
+            self.motion.set_listening(listening)
 
     def _poll_doa(self, t: float) -> None:
         if t - self._last_doa_poll < self._doa_poll_s:

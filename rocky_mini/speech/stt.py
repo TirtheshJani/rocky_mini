@@ -38,12 +38,13 @@ class FakeSTT:
 class RemoteSTT:
     """POSTs audio to the brain server /stt (faster-whisper). Lazy httpx import."""
 
-    def __init__(self, base_url: str, timeout_s: float = 15.0, token: str = "") -> None:
+    def __init__(self, base_url: str, timeout_s: float = 30.0, token: str = "") -> None:
         try:
             import httpx
         except ImportError as exc:  # pragma: no cover - optional dep
             raise RuntimeError(
-                "httpx is not installed. Install with: pip install 'rocky_mini[llm]'"
+                "httpx is not installed. It is a core dependency; reinstall with: "
+                "pip install -e ."
             ) from exc
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         self._client = httpx.AsyncClient(base_url=base_url, timeout=timeout_s, headers=headers)

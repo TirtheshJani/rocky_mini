@@ -2,13 +2,15 @@
 manager composition + no-snap blending."""
 
 import math
+import random
 
 import pytest
 
 from rocky_mini.motion.emotes import Trajectory, jazz_hands_delta
-from rocky_mini.motion.idle import breathing_delta, sleepwatch_delta
-from rocky_mini.motion.manager import MovementManager
+from rocky_mini.motion.idle import IdlePolicy, breathing_delta, sleepwatch_delta
+from rocky_mini.motion.manager import LISTEN_ANTENNA_RAISE, MovementManager
 from rocky_mini.motion.pose import (
+    ANTENNA_MAX,
     ANTENNA_MIN,
     PITCH_LIMIT,
     Pose,
@@ -17,6 +19,16 @@ from rocky_mini.motion.pose import (
     clamp_pose,
 )
 from rocky_mini.motion.wobble import WobbleTracker
+
+
+class _Clock:
+    """Controllable clock: tests advance .t and inject it as MovementManager's clock."""
+
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def __call__(self) -> float:
+        return self.t
 
 
 # -- clamp safety ----------------------------------------------------------
@@ -117,3 +129,111 @@ def test_manager_doa_orients_head():
     mgr.set_doa(40.0)
     pose = mgr.tick(t=0.0, dt=0.01)
     assert pose.head_yaw > 0  # turned toward the sound
+
+
+# -- attentive antenna perk (listening) ------------------------------------
+def test_set_listening_perks_and_blends_back():
+    clock = _Clock()
+    mgr = MovementManager(clock=clock)
+    antennas: list[float] = []
+
+    def _tick():
+        pose = mgr.tick(clock.t, dt=0.01)
+        antennas.extend([pose.antenna_left, pose.antenna_right])
+        return pose
+
+    # Baseline: listening off, antennas hover in the resting/breathing band (~10 deg).
+    rest = None
+    for i in range(20):
+        clock.t = i * 0.01
+        rest = _tick()
+    assert 7.0 <= rest.antenna_left <= 13.0
+    baseline_left = rest.antenna_left
+
+    # Listening on: over ~0.6 s the antennas perk well above the breathing band.
+    mgr.set_listening(True)
+    up = None
+    for _ in range(60):
+        clock.t += 0.01
+        up = _tick()
+    assert up.antenna_left > baseline_left + 10.0
+    assert up.antenna_left > 20.0  # settled above the resting/breathing band
+    assert up.antenna_right > 20.0  # both antennas raised together
+    assert up.antenna_left == pytest.approx(up.antenna_right, abs=1.0)
+
+    # Listening off: over ~0.6 s the antennas blend back down toward rest.
+    mgr.set_listening(False)
+    down = None
+    for _ in range(60):
+        clock.t += 0.01
+        down = _tick()
+    assert down.antenna_left < up.antenna_left
+
+    # Footgun 6: every commanded antenna stayed inside [3, 45] throughout.
+    assert min(antennas) >= ANTENNA_MIN
+    assert max(antennas) <= ANTENNA_MAX
+    # The perk target sits well inside the clamp (rest ~10 + LISTEN_ANTENNA_RAISE).
+    assert 3.0 <= 10.0 + LISTEN_ANTENNA_RAISE <= 45.0
+
+
+# -- idle liveliness cadence -----------------------------------------------
+def test_idle_policy_cadence_and_distribution():
+    glance_s = 100.0
+    policy = IdlePolicy(idle_glance_s=glance_s, rng=random.Random(12345))
+    # Nothing before the first window: the first poll lazily arms the cadence clock.
+    assert policy.maybe_act(0.0) is None
+    assert policy.maybe_act(glance_s * 0.5) is None
+
+    counts = {"none": 0, "sweep_look": 0, "calm": 0}
+    calm = {"bored", "surprised", "welcome"}
+    n = 20000
+    for i in range(1, n + 1):
+        action = policy.maybe_act(glance_s * i)
+        if action is None:
+            counts["none"] += 1
+        elif action == "sweep_look":
+            counts["sweep_look"] += 1
+        else:
+            assert action in calm  # every non-None action is a known idle action
+            counts["calm"] += 1
+
+    assert counts["none"] / n == pytest.approx(0.6, abs=0.03)
+    assert counts["sweep_look"] / n == pytest.approx(0.2, abs=0.03)
+    assert counts["calm"] / n == pytest.approx(0.2, abs=0.03)
+
+
+def test_manager_idle_fires_during_silence():
+    clock = _Clock()
+    mgr = MovementManager(clock=clock, idle_glance_s=1.0, rng=random.Random(0))
+    fired = False
+    for _ in range(1000):
+        clock.t += 1.0
+        mgr.tick(clock.t, dt=1.0)
+        if mgr._primary_emote is not None:
+            fired = True
+            break
+    assert fired, "an idle primary emote should eventually start during long silence"
+
+
+def test_manager_activity_resets_idle_timer():
+    clock = _Clock()
+    mgr = MovementManager(clock=clock, idle_glance_s=1.0, rng=random.Random(0))
+    # Prime: the first tick lazily arms the next-eval to t + idle_glance_s (= 1.0).
+    mgr.tick(clock.t, dt=0.01)  # t = 0.0
+    # Just before that window closes, activity re-arms the cadence to now + 1.0.
+    clock.t = 0.9
+    mgr.set_doa(20.0)
+    # Past the original window (1.0) but before the reset one (1.9): nothing fires.
+    clock.t = 1.2
+    mgr.tick(clock.t, dt=0.01)
+    assert mgr._primary_emote is None
+
+
+def test_manager_no_idle_action_while_sleep_watch():
+    clock = _Clock()
+    mgr = MovementManager(clock=clock, idle_glance_s=1.0, rng=random.Random(0))
+    mgr.set_sleep_watch(True)
+    for _ in range(200):
+        clock.t += 1.0
+        mgr.tick(clock.t, dt=1.0)
+        assert mgr._primary_emote is None  # idle actions never fire during sleep-watch

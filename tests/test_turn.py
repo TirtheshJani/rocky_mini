@@ -131,3 +131,145 @@ async def test_ack_fires_before_speaking(tmp_path):
     assert result.metrics.ack_ms is not None
     # Ack chord was queued to the mixer before any voice.
     assert mixer.pending()
+
+
+class _BoomTTS:
+    """TTS that always fails, simulating an unreachable speech server."""
+
+    sample_rate = 22050
+
+    async def synthesize(self, text: str):
+        raise ConnectionError("speech server down")
+
+
+class _CountingCanned:
+    """Stands in for CannedTTS: records requested clips, returns real PCM."""
+
+    sample_rate = 22050
+
+    def __init__(self):
+        self.clips: list[str] = []
+
+    async def synthesize(self, clip: str):
+        import numpy as np
+
+        self.clips.append(clip)
+        return np.ones(220, dtype=np.float32) * 0.1
+
+
+@pytest.mark.asyncio
+async def test_tts_failure_plays_canned_fallback_and_survives(tmp_path):
+    loop, io, mixer, memory = build_loop(tmp_path, FakeReply(text="One. Two. Three."))
+    canned = _CountingCanned()
+    loop.tts = _BoomTTS()
+    loop.fallback_tts = canned
+    result = await loop.handle_text_turn("Hello Rocky")
+    # The turn completes, the canned clip played exactly once, loop is reusable.
+    assert result.reply == "One. Two. Three."
+    assert canned.clips == ["pc_asleep.wav"]
+    mixer.render()
+    assert len(io.pushed) > 0
+    assert loop.state in ("IDLE", "SLEEPWATCH")
+
+
+class _BoomSTT:
+    async def transcribe(self, audio, sample_rate: int) -> str:
+        raise ConnectionError("speech server down")
+
+
+@pytest.mark.asyncio
+async def test_stt_failure_returns_empty_turn_with_canned_clip(tmp_path):
+    import numpy as np
+
+    loop, io, mixer, memory = build_loop(tmp_path, FakeReply(text="unused"))
+    canned = _CountingCanned()
+    loop.stt = _BoomSTT()
+    loop.fallback_tts = canned
+    result = await loop.handle_voice_turn(np.zeros(1600, dtype=np.float32), 16000)
+    assert result.reply == ""
+    assert canned.clips == ["cannot_reach.wav"]
+
+
+def _write_tiny_wav(path, samples=220, rate=22050):
+    import wave
+
+    import numpy as np
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pcm16 = (np.ones(samples, dtype=np.float32) * 0.1 * 32767).astype(np.int16)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm16.tobytes())
+
+
+@pytest.mark.asyncio
+async def test_fire_emote_pushes_voice_clip_when_loaded(tmp_path):
+    from rocky_mini.speech.tts import CannedTTS
+
+    canned_root = tmp_path / "canned"
+    _write_tiny_wav(canned_root / "emotes" / "amaze.wav")
+    io = FakeAudioIO()
+    mixer = Mixer(io, sample_rate=22050)
+    memory = MemoryStore(tmp_path)
+    loop = ConversationLoop(
+        llm=FakeLLM(FakeReply(text="Amaze.")),
+        tts=FakeTTS(sample_rate=22050),
+        mixer=mixer,
+        memory=memory,
+        tools=ToolExecutor(handlers={}),
+        fallback_tts=CannedTTS(canned_root, sample_rate=22050),
+    )
+    # The clip was preloaded from canned_dir/emotes at construction.
+    assert "amaze" in loop._emote_sounds
+    pcm, rate = loop._emote_sounds["amaze"]
+    assert rate == 22050 and pcm.dtype.name == "float32" and pcm.size == 220
+
+    # Firing the emote queues a voice item tagged with the current generation.
+    assert not mixer.pending()
+    loop._fire_emote("amaze")
+    assert mixer.pending()
+    assert mixer._voice[-1].generation == loop.generation
+
+    # Firing an emote with no loaded clip pushes nothing extra.
+    n_before = len(mixer._voice)
+    loop._fire_emote("no_such_emote_clip")
+    assert len(mixer._voice) == n_before
+
+
+@pytest.mark.asyncio
+async def test_emote_sounds_empty_without_fallback_tts(tmp_path):
+    # Sim path: no fallback_tts means no clips, and emotes stay motion-only.
+    loop, io, mixer, memory = build_loop(tmp_path, FakeReply(text="Amaze."))
+    assert loop._emote_sounds == {}
+    loop._fire_emote("amaze")
+    assert not mixer.pending()
+
+
+class _BoomLLM:
+    async def stream(self, messages):
+        raise ConnectionError("ollama down")
+        yield  # pragma: no cover - makes this an async generator
+
+@pytest.mark.asyncio
+async def test_llm_failure_plays_signal_bad_and_survives(tmp_path):
+    loop, io, mixer, memory = build_loop(tmp_path, FakeReply(text="unused"))
+    canned = _CountingCanned()
+    loop.llm = _BoomLLM()
+    loop.fallback_tts = canned
+    result = await loop.handle_text_turn("Hello Rocky")
+    assert result.reply == ""
+    assert canned.clips == ["signal_bad.wav"]
+    assert loop.state in ("IDLE", "SLEEPWATCH")
+
+
+@pytest.mark.asyncio
+async def test_wake_greeting_speaks_without_polluting_history(tmp_path):
+    loop, io, mixer, memory = build_loop(tmp_path, FakeReply(text="TJ! Rocky awake. Good. Good. Good."))
+    result = await loop.handle_wake_greeting()
+    assert result.reply == "TJ! Rocky awake. Good. Good. Good."
+    # No artificial user message; only Rocky's greeting is in history.
+    assert [m["role"] for m in loop.history] == ["assistant"]
+    # The WAKE nudge was consumed by this turn, not left pending for the next one.
+    assert not any(n.startswith("WAKE:") for n in loop._pending_system)

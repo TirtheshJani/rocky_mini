@@ -4,3 +4,13 @@ uvicorn>=0.29
 numpy>=1.26
 faster-whisper>=1.0
 piper-tts>=1.2
+# Visual object memory embedder (/embed_image, decision 21): frozen DINOv2 via torch.hub.
+torch>=2.1
+pillow>=10.0
+# Eridian voice-box DSP on /tts (pitch shift + chord layers). ROCKY_TTS_FX=0 disables.
+librosa>=0.10
+# Movie-Rocky voice clone (ROCKY_TTS_BACKEND=clone): XTTS v2 zero-shot cloning.
+# transformers is pinned for coqui-tts compat (rocky_say gist). Needs torchaudio too.
+coqui-tts
+transformers==4.44.0
+torchaudio>=2.1

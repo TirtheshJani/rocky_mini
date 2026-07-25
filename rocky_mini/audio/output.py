@@ -43,12 +43,17 @@ class Mixer:
         ring_carrier_hz: float = 140.0,
         sample_rate: int = 22050,
         ring_mod_enabled: bool = True,
+        ring_mix: float = 1.0,
     ) -> None:
         self.io = io
         self.frame = frame
         self.ring_carrier_hz = ring_carrier_hz
         self.sample_rate = sample_rate
         self.ring_mod_enabled = ring_mod_enabled
+        # Wet/dry blend for the ring mod. 1.0 is the fully modulated alien timbre
+        # (unintelligible sidebands only); ~0.2 keeps the voice natural with a
+        # metallic electronic edge, which is the movie Rocky sound.
+        self.ring_mix = float(min(1.0, max(0.0, ring_mix)))
         self._voice: deque[VoiceItem] = deque()
         self._chord: deque[np.ndarray] = deque()
         self._generation = 0
@@ -92,11 +97,15 @@ class Mixer:
             if item.generation < self._generation:
                 self.dropped_generations += 1
                 continue
-            if self.ring_mod_enabled:
+            if self.ring_mod_enabled and self.ring_mix > 0.0:
                 modded, self._carrier_phase = ring_mod(
                     item.pcm, self.ring_carrier_hz, self.sample_rate, self._carrier_phase
                 )
-                pieces.append(modded)
+                if self.ring_mix >= 1.0:
+                    pieces.append(modded)
+                else:
+                    dry = item.pcm.astype(np.float32, copy=False)
+                    pieces.append(self.ring_mix * modded + (1.0 - self.ring_mix) * dry)
             else:
                 pieces.append(item.pcm)
         return np.concatenate(pieces) if pieces else np.zeros(0, dtype=np.float32)

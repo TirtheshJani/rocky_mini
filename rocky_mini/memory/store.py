@@ -28,7 +28,7 @@ from .models import (
 
 _WS = re.compile(r"\s+")
 _TRAILING_INT = re.compile(r"(\d+)$")
-_LOG_FILES = ("facts.jsonl", "open_questions.jsonl", "sessions.jsonl")
+_LOG_FILES = ("facts.jsonl", "open_questions.jsonl", "sessions.jsonl", "objects.jsonl")
 
 
 def _default_now() -> str:

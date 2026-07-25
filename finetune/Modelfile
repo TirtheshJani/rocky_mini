@@ -1,6 +1,8 @@
 # Ollama Modelfile for the Rocky LoRA build.
-# After training + GGUF Q5_K_M export:  ollama create rocky -f finetune/Modelfile
+# After training + merge + GGUF Q5_K_M export (see finetune/README.md step 2):
+#   ollama create rocky -f finetune/Modelfile
 # The result is tagged rocky:latest (set ROCKY_MODEL=rocky:latest or toggle in the UI).
+# Point FROM at whatever .gguf the merge produced (Unsloth writes it under outputs/).
 
 FROM ./outputs/rocky-merged-q5_k_m.gguf
 

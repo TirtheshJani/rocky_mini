@@ -39,6 +39,40 @@
   (`reachy-mini-daemon --mockup-sim --headless --no-media --autostart`); live probes
   in the audit's evidence appendix were run against that daemon.
 
+## Local-machine session (2026-07-20): LoRA-first + real-brain wiring
+
+Done here (no robot, no GPU needed; all tests green with and without SDK/Ollama):
+- Wired the real LLM behind `ROCKY_LLM_BACKEND` (default still Fake). decisions.md 13.
+- Blended Rocky's voice (kept tics, loosened rigidity, added warmth). decisions.md 12.
+- Built the LoRA dataset pipeline: `make_seed.py` (authored gold), `neutral.py`
+  (anti-forgetting replay), `synth.py` (off-novel bulk via Ollama), `mine_book.py`
+  (paraphrased book calibration + memorization probes), `build_dataset.py` (QC that
+  reuses the runtime character utilities). Data is gitignored and local. decisions.md 14.
+- eval.py is now the full ship gate: A/B baseline, memorization probe, capability
+  regression. train.py tuned (2 epochs, num_proc=1). Merge-then-quantize serve runbook in
+  finetune/README. decisions.md 15.
+- scripts/check_kv_reuse.py closes the audit's INCONCLUSIVE footgun-4 gap.
+
+Needs TJ's machine (documented in docs/tutorial.md and docs/bring-up.md):
+- Ollama pull + stock baseline turn; synth/mine_book bulk generation to reach 250-350;
+  WSL2 QLoRA train + merge + `ollama create rocky`; run the eval gate; flip ROCKY_MODEL.
+- Speech server real STT/TTS models; `scripts/measure_latency.py` real numbers;
+  `scripts/check_kv_reuse.py` verdict. These produce the honest latency figures the
+  README still states as a budget.
+
+## Brain server runtime notes (2026-07-20)
+
+- Ollama 0.32.1 runs as a plain `ollama serve` process started in a terminal; the tray
+  app never bound port 11434 on this PC. Verify with `curl localhost:11434/api/version`
+  before a session.
+- KV prefix reuse IS live on 0.32.1 (corrected finding, same day as the wrong negative):
+  `prompt_eval_count` on 0.32.x reports total prompt size, cached or not, so only
+  `prompt_eval_duration` proves reuse. scripts/check_kv_reuse.py now verdicts on duration
+  (14-17% turn-2 prefill ratio on both rocky:latest and stock qwen2.5).
+- Eval-gate scores are repeatable within one server process only; the stock baseline has
+  scored 1/20 and 16/20 naivety leaks in different server sessions. A/B comparisons must
+  come from a single eval.py invocation (which is how --baseline works).
+
 ## Footgun reminders
 
 See CLAUDE.md. Most load-bearing: one set_target owner, one push_audio_sample owner,

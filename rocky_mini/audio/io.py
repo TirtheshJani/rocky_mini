@@ -8,10 +8,13 @@ sounddevice, or a working GStreamer.
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from typing import Protocol, runtime_checkable
 
 import numpy as np
+
+logger = logging.getLogger("rocky_mini.audio_io")
 
 
 @runtime_checkable
@@ -155,6 +158,7 @@ class ReachyMediaIO:
                 raise RuntimeError(f"mini.media lacks {name}(); SDK contract changed, re-audit")
         self._mini = mini
         self._media = media
+        self._doa_error_logged = False
         # SDK pipelines are lazy: without these calls, reads return None forever
         # and pushed frames are dropped with only a log warning (audit F5/F6).
         media.start_recording()
@@ -182,7 +186,21 @@ class ReachyMediaIO:
             clear()
 
     def get_DoA(self) -> tuple[float, bool] | None:
-        reading = self._media.get_DoA()
+        # The ReSpeaker DoA read is a USB control-transfer that can throw a
+        # transient USBError (errno 5) under bus contention. DoA is orientation
+        # only; a flaky read must never propagate and kill the mic thread that
+        # calls this. Degrade to "no reading" instead (footgun 9 stays safe: no
+        # DoA simply means no gaze steering this tick).
+        try:
+            reading = self._media.get_DoA()
+        except Exception as exc:  # noqa: BLE001 - any USB/backend fault must not crash voice
+            if not self._doa_error_logged:
+                logger.warning(
+                    "DoA read failed (%s); gaze steering off until it recovers, "
+                    "voice input unaffected", exc
+                )
+                self._doa_error_logged = True
+            return None
         if reading is None:
             return None
         angle_rad, speech = reading

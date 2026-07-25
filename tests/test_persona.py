@@ -74,3 +74,14 @@ def test_epistemic_ledger_is_present():
     prompt = persona.build_system_prompt(STAGE_TELEGRAPHIC)
     assert "EPISTEMIC LEDGER" in prompt
     assert "question?" in prompt
+
+
+def test_output_contract_lists_movie_emotes():
+    prompt = persona.build_system_prompt(STAGE_TELEGRAPHIC)
+    for name in ("amaze", "happy", "laugh", "sad", "grateful", "welcome", "sleep"):
+        assert name in prompt
+    # Legacy emotes remain valid alongside the new ones.
+    for name in ("jazz_hands", "thinking", "understand", "sleepy"):
+        assert name in prompt
+    assert "—" not in prompt
+    assert "–" not in prompt

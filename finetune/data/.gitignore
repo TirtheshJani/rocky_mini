@@ -1,0 +1,6 @@
+# Training data files are build artifacts, not source. They are regenerable from the
+# committed scripts (make_seed.py, neutral.py, build_dataset.py) or generated locally on
+# the GPU box (synth.py, mine_book.py). The mined, synthetic, and assembled sets include
+# book-paraphrased content and are kept LOCAL and NON-DISTRIBUTED (see decisions.md).
+# Only the schema and the builder scripts are tracked.
+*.jsonl

@@ -19,15 +19,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train the Rocky LoRA (Unsloth QLoRA)")
     parser.add_argument("--data", default="finetune/data/rocky_dialogues.jsonl")
     parser.add_argument("--out", default="outputs/rocky-lora")
-    parser.add_argument("--epochs", type=int, default=3)
+    # 2 epochs by default: style is cheap to teach and over-training a small set drives
+    # catastrophic forgetting (naive style tunes lose 12 to 18 percent on instruction
+    # following). The neutral-replay rows in the data are the other guard. Raise only if
+    # the eval gate shows the voice is too weak.
+    parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--rank", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     try:
+        from unsloth import FastLanguageModel  # must import before trl so its patches bind
         from datasets import load_dataset
         from trl import SFTTrainer, SFTConfig
-        from unsloth import FastLanguageModel
     except ImportError as exc:
         raise SystemExit(
             "Unsloth/TRL/datasets not installed. Training runs in WSL2 with CUDA; "
@@ -59,7 +63,7 @@ def main() -> None:
 
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         train_dataset=dataset,
         args=SFTConfig(
             output_dir=args.out,
@@ -71,6 +75,8 @@ def main() -> None:
             logging_steps=5,
             seed=args.seed,
             dataset_text_field="text",
+            eos_token="<|im_end|>",  # Qwen2.5 chat EOS; Unsloth's tokenizer reports a placeholder.
+            dataset_num_proc=1,  # Unsloth on Windows/WSL crashes with multiprocess mapping.
         ),
     )
     trainer.train()

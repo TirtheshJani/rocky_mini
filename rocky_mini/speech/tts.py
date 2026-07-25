@@ -61,6 +61,10 @@ class CannedTTS:
         with wave.open(str(path), "rb") as w:
             frames = w.readframes(w.getnframes())
             arr = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+            if w.getnchannels() > 1:
+                arr = arr.reshape(-1, w.getnchannels()).mean(axis=1).astype(np.float32)
+            # Report the file's true rate so the Mixer resamples correctly.
+            self.sample_rate = w.getframerate()
         return arr
 
     async def synthesize(self, text: str) -> np.ndarray:
@@ -72,13 +76,14 @@ class RemoteTTS:
     """POSTs text to the brain server /tts (Piper). Lazy httpx import."""
 
     def __init__(
-        self, base_url: str, sample_rate: int = 22050, timeout_s: float = 15.0, token: str = ""
+        self, base_url: str, sample_rate: int = 22050, timeout_s: float = 30.0, token: str = ""
     ) -> None:
         try:
             import httpx
         except ImportError as exc:  # pragma: no cover - optional dep
             raise RuntimeError(
-                "httpx is not installed. Install with: pip install 'rocky_mini[llm]'"
+                "httpx is not installed. It is a core dependency; reinstall with: "
+                "pip install -e ."
             ) from exc
         headers = {"Authorization": f"Bearer {token}"} if token else {}
         self.sample_rate = sample_rate

@@ -49,3 +49,10 @@ rocky_mini/unsloth_compiled_cache/
 
 # reference material kept local, never distributed (decisions.md 14)
 docs/*.pdf
+
+# Voice-clone scratch samples and server run logs (session artifacts)
+rocky_*.wav
+server_out.log
+server_err.log
+outputs/*.sh
+outputs/*.py

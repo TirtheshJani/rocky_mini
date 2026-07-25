@@ -262,3 +262,14 @@ async def test_llm_failure_plays_signal_bad_and_survives(tmp_path):
     assert result.reply == ""
     assert canned.clips == ["signal_bad.wav"]
     assert loop.state in ("IDLE", "SLEEPWATCH")
+
+
+@pytest.mark.asyncio
+async def test_wake_greeting_speaks_without_polluting_history(tmp_path):
+    loop, io, mixer, memory = build_loop(tmp_path, FakeReply(text="TJ! Rocky awake. Good. Good. Good."))
+    result = await loop.handle_wake_greeting()
+    assert result.reply == "TJ! Rocky awake. Good. Good. Good."
+    # No artificial user message; only Rocky's greeting is in history.
+    assert [m["role"] for m in loop.history] == ["assistant"]
+    # The WAKE nudge was consumed by this turn, not left pending for the next one.
+    assert not any(n.startswith("WAKE:") for n in loop._pending_system)

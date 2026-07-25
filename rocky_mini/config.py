@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     # Speech brain service (faster-whisper + Piper).
     speech_base_url: str = "http://localhost:8123"
 
+    # Visual object memory (decision 21): frozen DINOv2 embeddings, few-shot cosine match.
+    # The image embedder lives on the speech server (/embed_image), because Ollama has no
+    # image-embedding API. Kill switch: ROCKY_OBJECT_MEMORY_ENABLED=0 makes the jsonl
+    # sidecar inert and recognition a no-op.
+    object_memory_enabled: bool = True
+    embed_url: str = ""  # empty -> use speech_base_url (the speech server hosts /embed_image).
+    object_match_threshold: float = 0.60  # min cosine to accept a match (pending hardware tuning).
+    object_match_margin: float = 0.08  # min top1-top2 gap; skipped with one enrolled object.
+
     # LAN.
     lan_token: str = ""
 
@@ -73,6 +82,8 @@ class Settings(BaseSettings):
 
     # Vision (Phase 5, decision 18): client-side face tracking that feeds gaze only.
     vision_enabled: bool = True  # ROCKY_VISION_ENABLED=0 -> DoA-only (reversal path).
+    # Rocky greets first on wake (official conversation app pattern). ROCKY_WAKE_GREETING=0 disables.
+    wake_greeting_enabled: bool = True
     vision_backend: str = "fake"  # "reachy" | "fake"
     face_detector: str = "fake"  # "daemon" | "haar" | "fake"
     vision_model: str = "qwen2.5vl:7b"  # look-around tool model (consumed in Phase 6).
@@ -97,6 +108,10 @@ class Settings(BaseSettings):
     @property
     def sessions_path(self) -> Path:
         return self.home_dir / "sessions.jsonl"
+
+    def resolved_embed_url(self) -> str:
+        """Base URL for the image embedder: ROCKY_EMBED_URL if set, else the speech server."""
+        return self.embed_url or self.speech_base_url
 
 
 def load_settings(**overrides: object) -> Settings:

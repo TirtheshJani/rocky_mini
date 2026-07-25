@@ -150,6 +150,27 @@ Format: date | decision | reasoning | reversal condition.
     timing both on the PC (10.0.0.95) once hardware is back; the measured choice replaces this
     default here. Reversal: swap the env value; no code change needed.
 
+21. **Visual object memory: frozen DINOv2 embeddings, few-shot cosine match, no training.**
+    TJ shows Rocky a physical object and names it; a new `teach_object` tool embeds the
+    current camera frame and stores it as one to three shots in an event-sourced
+    `objects.jsonl` sidecar under `~/.rocky_mini` (footgun 5), keyed by name. Later,
+    recognition rides the existing `_look_handler` (so it covers both the `look_around`
+    tool and the spontaneous curious glance with no new threads and no VisionThread
+    change; footgun 1 untouched): the frame is embedded and matched by max cosine over an
+    object's shots, accepted only if score >= threshold AND (with two or more objects) it
+    beats the runner-up by a margin. The embedder is NOT in Ollama, which has no
+    image-embedding API (issues #4296, #5304); it is a `/embed_image` endpoint on the
+    speech server (frozen DINOv2 ViT-S/14, ~85 MB, L2-normalized server-side), reached by
+    the robot via `HttpImageEmbedder` behind the same Protocol+Fake seam as the observer.
+    `teach_object` ALSO records a plain `remember_fact("object", ...)`, so the object
+    enters the epistemic ledger even in sim, with the camera down, or with the switch off,
+    where it degrades to the fact only and never raises. Threshold 0.60 / margin 0.08 are
+    provisional, to be tuned from logged top-2 scores at hardware bring-up (probe-style,
+    like decision 20). v1 embeds the whole frame; a qwen2.5vl bbox-crop is the noted
+    upgrade if real-world matching is noisy. Kill switch: `ROCKY_OBJECT_MEMORY_ENABLED=0`
+    makes the sidecar inert and recognition a no-op. Reversal: flip the switch; the jsonl
+    sidecar sits idle, carried by export_zip but never read.
+
 16. **(2026-07-22) Rocky's voice and mannerisms align to the film, not the book's raw telegraphic stage.**
     The Project Hail Mary film gives Rocky a deadpan, slightly degraded computer-voice-box
     delivery (James Ortiz; "a little Mr. Moviefone, a little Siri, only not as clean") over
@@ -171,3 +192,39 @@ Format: date | decision | reasoning | reversal condition.
     CannedTTS, and the loop stays alive for the next utterance. Reasoning: on hardware the
     only failure surface was a logged exception; Rocky appearing to die whenever the PC
     slept was indistinguishable from a crash. Reversal: none; silence is never the right UX.
+
+22. **(2026-07-23) Lively-conversation pass: LoRA v2 + persona reply-shape rule + wake greeting.**
+    Live conversation felt clipped and robotic; root cause was the training mix itself:
+    gold replies averaged 13 words and the persona ordered "one main idea per turn".
+    Studied the official reachy_mini_conversation_app for reference patterns and adopted
+    three: an explicit reply-shape rule in the prompt, robot-speaks-first greeting, and
+    varied wording guidance. Changes: (a) persona speech rule is now react + one own
+    thought + hand the turn back, two to four short sentences; (b) 18 new lively authored
+    exemplars, livelier synth few-shots plus a generation-only STYLE_HINT, and 18 new
+    conversational topics (opinions, stories, banter); (c) neutral replay grown to 60 rows
+    to hold the 15-20 percent anti-forgetting band (369 total, 16 percent neutral);
+    (d) ConversationLoop.handle_wake_greeting() speaks a varied in-character greeting at
+    hardware startup (ROCKY_WAKE_GREETING=0 disables). LoRA v2 trains on the new persona
+    bytes so training and runtime prefixes stay byte-identical. Also this pass: speech
+    server pre-warms all models at boot (a cold faster-whisper load caused an
+    httpx.ReadTimeout and a canned-fallback first turn), client speech timeouts 15->30 s,
+    whisper small->medium (ROCKY_WHISPER_SIZE), and the Eridian voice-box DSP on /tts
+    (pitch -2 semitones plus fifth/octave underlay, ROCKY_TTS_FX=0 reverts). Shipped 2026-07-23: eval gate PASS (0/20 naivety leaks, particle rate 1.0, tool
+    validity 1.0, memorization pass, capability 1.0 vs baseline 0.875); rocky:latest
+    re-tagged to the v2 build (hash d2aa4e6f8bd4, rocky-v2 kept as an alias). Reversal:
+    if live conversation regresses, ollama create rocky -f finetune/Modelfile (v1 gguf); if TJ finds the chord timbre muddy on the
+    robot speaker, lower ROCKY_TTS_FX_FIFTH_GAIN / _OCTAVE_GAIN.
+
+23. **(2026-07-23) Rocky's voice is the Chatterbox movie-audio clone, "early" reference cut.**
+    TJ rejected Piper (robotic), Piper+chord DSP (more robotic), and an XTTS v2 clone
+    (dated, stilted). Chatterbox (Resemble AI, open) cloning a clean 12 s cut (5-17 s) of
+    the scrubbed film audio from pedramamini's rocky_say gist won TJ's A/B across three
+    reference cuts. Live settings: exaggeration 0.5, cfg_weight 0.6 (an auto-picked
+    loudest-window reference plus cfg 0.35 drifted into a wrong accent; adherence and a
+    hand-checked cut fixed it). Serving venv is C:\Users\TJ\rocky_tts_trial (chatterbox's
+    transformers pin conflicts with coqui's); chatterbox loads FIRST in warm-up (loading
+    it after ctranslate2 binds cudnn crashed the process), DINO moved to CPU and whisper
+    back to small for VRAM headroom (peak ~10 GB of 12 GB with the 7B resident). Cost:
+    ~5.5 s per spoken sentence on the shared GPU, so first audio trails the ack chord by
+    ~5 s. Reversal: ROCKY_TTS_BACKEND=piper for instant-but-robotic; if latency grates,
+    revisit streaming generation or a faster clone model, not the DSP path.

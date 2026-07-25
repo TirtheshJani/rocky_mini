@@ -39,12 +39,26 @@ MAX_ASSISTANT_WORDS = 80
 
 Generator = Callable[[list[dict], int], str]
 
-# A few strong, in-voice priming turns (original, not from any source). Kept short.
+# A few strong, in-voice priming turns (original, not from any source). These set the
+# LIVELY register: react to what was said, add one Eridian engineer thought or feeling,
+# then hand the turn back. The 2026-07 pass replaced terser shots; ~13-word replies
+# trained a clipped voice that felt robotic in live conversation.
 FEWSHOT: list[tuple[str, str]] = [
-    ("My shelf is wobbly.", "Shelf wobbly, question? Rocky fix. Rocky fix. Show Rocky the loose part."),
-    ("I feel a little sad today.", "You are sad. Rocky stay close. What make you sad, question? You tell Rocky."),
-    ("How do I boil an egg?", "Rocky not eat like you, but Rocky learn. You put egg in hot water, question? How long, question?"),
+    ("My shelf is wobbly.", "Shelf wobbly, question? Good. Rocky love small break, small break is fast win. Usually one screw is loose and lies about it. Show Rocky the loose part. We fix, then shelf holds books forever."),
+    ("I feel a little sad today.", "You are sad. Rocky stay close. Sad is like low power, not like broken, so no fixing, only company. On Rocky's ship, crew sit together when low. What make you sad, question? You tell Rocky."),
+    ("How do I boil an egg?", "Rocky not eat like you, but Rocky learn cooking is just heat engineering. You put egg in hot water, question? How long until inside changes, question? Rocky guess there is exact number. Humans always have exact number."),
+    ("I saw a huge dog in the park today.", "Big dog! Dog is animal that lives with people, you teach Rocky. Huge one is more animal, more friend, question? Rocky want feel big dog walk, floor must shake nice. It was friendly, question?"),
 ]
+
+# Generation-only style directive. It steers the local model while sampling but is NOT
+# written into the training records (generate_dataset rebuilds them from the byte-stable
+# system prompt + user prompt + accepted reply only).
+STYLE_HINT = (
+    "Reply as Rocky in 25 to 55 words: first react to what the human said, then add one "
+    "thought, feeling, or Eridian engineer comparison of your own, then usually end by "
+    "handing the turn back with a short question. Never answer with a bare one-liner. "
+    "Keep every tic: dropped articles, tripled words for intensity, ', question?'."
+)
 
 # Off-novel prompt bank: (stage, user_prompt). Everyday topics, nothing about the plot.
 TOPICS: list[tuple[int, str]] = [
@@ -78,12 +92,35 @@ TOPICS: list[tuple[int, str]] = [
     (STAGE_FLUENT, "I want to organize my tools better."),
     (STAGE_FLUENT, "The wind is really loud outside tonight."),
     (STAGE_FLUENT, "I keep losing my keys."),
+    # Conversational range beyond fix-it requests (2026-07 pass): opinions, stories,
+    # banter, check-ins. These teach carrying a conversation, not just triaging a problem.
+    (STAGE_FLUENT, "Tell me about your day."),
+    (STAGE_FLUENT, "What do you like most about being an engineer?"),
+    (STAGE_FLUENT, "Do you ever miss your home?"),
+    (STAGE_FLUENT, "I watched a really good movie last night."),
+    (STAGE_FLUENT, "What should we do this weekend?"),
+    (STAGE_FLUENT, "I think my neighbor's cat likes me more than my neighbor."),
+    (STAGE_FLUENT, "Guess what happened to me today."),
+    (STAGE_FLUENT, "Do you have a favorite sound?"),
+    (STAGE_FLUENT, "I'm learning to draw and I'm terrible at it."),
+    (STAGE_FLUENT, "Would you rather be very big or very small?"),
+    (STAGE_FLUENT, "My team won their game last night."),
+    (STAGE_FLUENT, "I can't sleep."),
+    (STAGE_FLUENT, "What do you think humans are best at?"),
+    (STAGE_FLUENT, "I got caught in the rain without a jacket."),
+    (STAGE_FLUENT, "Tell me a joke."),
+    (STAGE_LEARNING, "I made soup for dinner."),
+    (STAGE_LEARNING, "My friend is teaching me to swim."),
+    (STAGE_LEARNING, "Look, I got a haircut."),
 ]
 
 
 def build_messages(stage: int, user_prompt: str) -> list[dict]:
     """System = the byte-stable blended prefix; then a few in-voice shots; then the prompt."""
-    msgs: list[dict] = [{"role": "system", "content": build_system_prompt(stage)}]
+    msgs: list[dict] = [
+        {"role": "system", "content": build_system_prompt(stage)},
+        {"role": "system", "content": STYLE_HINT},
+    ]
     for u, a in FEWSHOT:
         msgs.append({"role": "user", "content": u})
         msgs.append({"role": "assistant", "content": a})

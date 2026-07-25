@@ -37,6 +37,10 @@ class LookAroundArgs(BaseModel):
     question: str = ""
 
 
+class TeachObjectArgs(BaseModel):
+    name: str
+
+
 # Sorted by name (the plan requires deterministic tool ordering).
 TOOL_MODELS: dict[str, type[BaseModel]] = {
     "confirm_fact": ConfirmFactArgs,
@@ -44,6 +48,7 @@ TOOL_MODELS: dict[str, type[BaseModel]] = {
     "note_open_question": NoteOpenQuestionArgs,
     "remember_fact": RememberFactArgs,
     "set_sleep_watch": SetSleepWatchArgs,
+    "teach_object": TeachObjectArgs,
 }
 
 _TOOL_DESCRIPTIONS = {
@@ -53,6 +58,8 @@ _TOOL_DESCRIPTIONS = {
     "note_open_question": "Record something Rocky is curious about and wants to ask later.",
     "remember_fact": "Store a durable Earth fact TJ just taught, with the source quote.",
     "set_sleep_watch": "Enter or leave sleep-watch mode (watch over TJ while he rests).",
+    "teach_object": "Enroll the object TJ is showing right now via the camera instrument, "
+    "so you recognize it by sight later. Use when TJ holds up a physical object and names it.",
 }
 
 

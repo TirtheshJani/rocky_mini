@@ -76,7 +76,7 @@ class RemoteTTS:
     """POSTs text to the brain server /tts (Piper). Lazy httpx import."""
 
     def __init__(
-        self, base_url: str, sample_rate: int = 22050, timeout_s: float = 15.0, token: str = ""
+        self, base_url: str, sample_rate: int = 22050, timeout_s: float = 30.0, token: str = ""
     ) -> None:
         try:
             import httpx

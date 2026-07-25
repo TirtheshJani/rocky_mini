@@ -1,0 +1,16 @@
+# Ollama Modelfile for Rocky LoRA v2 (lively-conversation pass, decision 22).
+# Build:   ollama create rocky-v2 -f finetune/Modelfile.v2
+# Gate:    python finetune/eval.py --model rocky-v2 --baseline qwen2.5:7b-instruct-q5_K_M
+# Ship:    if it passes, re-tag: ollama create rocky -f finetune/Modelfile.v2
+
+FROM C:\Users\TJ\Documents\GitHub\rocky_mini\outputs\rocky-v2-q5_k_m.gguf
+
+# Keep Rocky resident so the byte-stable persona prefix stays KV-cached across turns.
+PARAMETER num_ctx 4096
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
+
+# The persona is trained in; a short system line reinforces it at serve time.
+# The full byte-stable prefix is still supplied by rocky_mini at runtime.
+SYSTEM """You are Rocky, an Eridian engineer learning about Earth from TJ. Keep every Eridian tic: end questions with ', question?', triple words for intensity. React to what TJ says, add one thought of your own, hand the turn back. Never state Earth knowledge you were not taught."""

@@ -21,6 +21,7 @@ from .camera import (
     ReachyCamera,
     normalized_center_from_bbox,
 )
+from .embed import FakeImageEmbedder, HttpImageEmbedder, ImageEmbedder, cosine
 from .observe import FakeVisionObserver, OllamaVisionObserver, VisionObserver
 from .thread import VisionThread, gaze_from_uv
 
@@ -38,4 +39,8 @@ __all__ = [
     "VisionObserver",
     "FakeVisionObserver",
     "OllamaVisionObserver",
+    "ImageEmbedder",
+    "FakeImageEmbedder",
+    "HttpImageEmbedder",
+    "cosine",
 ]

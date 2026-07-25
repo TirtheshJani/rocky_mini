@@ -162,6 +162,18 @@ class ConversationLoop:
             return TurnResult(reply="")
         return await self.handle_text_turn(user_text, t_start=t_start)
 
+    async def handle_wake_greeting(self) -> TurnResult:
+        """Rocky speaks first when he wakes, like the official conversation app.
+
+        A greeting nudge rides _pending_system and the turn runs with no user message,
+        so nothing artificial enters the history. Sampling varies the wording.
+        """
+        self._pending_system.append(
+            "WAKE: You just woke up and TJ is near. Greet TJ briefly in character, one or "
+            "two short sentences, and invite conversation. Vary the wording every time."
+        )
+        return await self.handle_text_turn("")
+
     async def handle_text_turn(self, user_text: str, t_start: float | None = None) -> TurnResult:
         metrics = TurnMetrics(generation=self.generation)
         metrics.t_start = self.clock() if t_start is None else t_start
@@ -224,6 +236,15 @@ class ConversationLoop:
             )
 
         metrics.t_done = self.clock()
+        logger.info(
+            "turn done: ack=%sms first_audio=%ss total=%ss prompt_tokens=%d eval_tokens=%d tools=%d",
+            None if metrics.ack_ms is None else round(metrics.ack_ms),
+            None if metrics.time_to_first_audio_s is None else round(metrics.time_to_first_audio_s, 2),
+            None if metrics.total_s is None else round(metrics.total_s, 2),
+            metrics.prompt_eval_count,
+            metrics.eval_count,
+            metrics.tool_calls,
+        )
         # Optional spontaneous curious glance: on a proactive turn, Rocky sometimes
         # reads the room with his camera instrument and carries what he saw into the
         # next turn. Done AFTER t_done so the vision call never inflates reported
@@ -271,7 +292,8 @@ class ConversationLoop:
             messages.append({"role": "system", "content": correction})
         self._pending_system = []
         messages.extend(self.history)
-        messages.append({"role": "user", "content": user_text})
+        if user_text:
+            messages.append({"role": "user", "content": user_text})
         return messages
 
     async def _speak_chunk(self, chunk: Chunk, metrics: TurnMetrics) -> None:
@@ -375,8 +397,10 @@ class ConversationLoop:
         return results
 
     def _record_history(self, user_text: str, reply: str) -> None:
-        self.history.append({"role": "user", "content": user_text})
-        self.history.append({"role": "assistant", "content": reply})
+        if user_text:
+            self.history.append({"role": "user", "content": user_text})
+        if reply:
+            self.history.append({"role": "assistant", "content": reply})
         # Trim in large chunks so the KV-cache prefix (system messages) stays stable.
         if len(self.history) > _HISTORY_MAX:
             self.history = self.history[_HISTORY_TRIM:]

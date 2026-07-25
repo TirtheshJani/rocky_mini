@@ -41,7 +41,7 @@ def test_bad_json_raises():
         parse_tool_call("note_open_question", "{not json")
 
 
-def test_tool_specs_are_the_five_sorted():
+def test_tool_specs_are_the_six_sorted():
     specs = tool_specs()
     names = [s["function"]["name"] for s in specs]
     assert names == sorted(names)
@@ -51,7 +51,15 @@ def test_tool_specs_are_the_five_sorted():
         "note_open_question",
         "remember_fact",
         "set_sleep_watch",
+        "teach_object",
     ]
+
+
+def test_parse_teach_object_requires_name():
+    args = parse_tool_call("teach_object", {"name": "coffee mug"})
+    assert args.name == "coffee mug"
+    with pytest.raises(ToolCallError):
+        parse_tool_call("teach_object", {})
 
 
 def test_parse_look_around_empty_ok():

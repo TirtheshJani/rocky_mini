@@ -38,7 +38,7 @@ class FakeSTT:
 class RemoteSTT:
     """POSTs audio to the brain server /stt (faster-whisper). Lazy httpx import."""
 
-    def __init__(self, base_url: str, timeout_s: float = 15.0, token: str = "") -> None:
+    def __init__(self, base_url: str, timeout_s: float = 30.0, token: str = "") -> None:
         try:
             import httpx
         except ImportError as exc:  # pragma: no cover - optional dep

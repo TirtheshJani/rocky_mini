@@ -1,11 +1,13 @@
 """Memory tests: durability across restart, confidence lifecycle, dedup, digest,
-fuzzy facts, export/import round-trip."""
+fuzzy facts, export/import round-trip (including the visual-object sidecar)."""
 
+import zipfile
 from itertools import count
 
 import pytest
 
 from rocky_mini.memory.models import CONFIRMED, HEARD_ONCE, MASTERED
+from rocky_mini.memory.objects import ObjectStore
 from rocky_mini.memory.store import MemoryStore
 
 
@@ -132,3 +134,40 @@ def test_active_facts_are_chronological_beyond_ten(tmp_path):
     ids = [f.id for f in store.active_facts()]
     # Insertion order, not lexical id order (f10 must not sort before f2).
     assert ids == [f"f{i}" for i in range(1, 13)]
+
+
+# -- visual object memory rides the same export/import (decision 21) --------
+def test_export_includes_objects_jsonl(tmp_path):
+    mem = MemoryStore(tmp_path, now=make_clock())
+    ObjectStore(tmp_path, now=make_clock()).enroll("mug", [1.0, 0.0, 0.0])
+    zpath = mem.export_zip(tmp_path / "snap.zip")
+    with zipfile.ZipFile(zpath) as zf:
+        assert "objects.jsonl" in zf.namelist()
+
+
+def test_import_round_trips_objects(tmp_path):
+    src_dir = tmp_path / "src"
+    mem = MemoryStore(src_dir, now=make_clock())
+    ObjectStore(src_dir, now=make_clock()).enroll("mug", [1.0, 0.0, 0.0])
+    zpath = mem.export_zip(tmp_path / "snap.zip")
+
+    dst_dir = tmp_path / "dst"
+    dst = MemoryStore(dst_dir, now=make_clock())
+    assert ObjectStore(dst_dir).names() == []
+    dst.import_zip(zpath)
+    assert ObjectStore(dst_dir).names() == ["mug"]
+
+
+def test_import_old_zip_clears_stale_objects(tmp_path):
+    # src has facts but no objects; dst has a stale object that import must wipe.
+    src_dir = tmp_path / "src"
+    src = MemoryStore(src_dir, now=make_clock())
+    src.remember_fact("food", "taco is food")
+    zpath = src.export_zip(tmp_path / "snap.zip")
+
+    dst_dir = tmp_path / "dst"
+    dst = MemoryStore(dst_dir, now=make_clock())
+    ObjectStore(dst_dir, now=make_clock()).enroll("old mug", [1.0, 0.0, 0.0])
+    assert ObjectStore(dst_dir).names() == ["old mug"]
+    dst.import_zip(zpath)
+    assert ObjectStore(dst_dir).names() == []  # stale objects.jsonl removed

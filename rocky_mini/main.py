@@ -225,6 +225,21 @@ class RockyMiniApp(_BaseApp):
                 daemon=True, name="VisionThread",
             )
             vision_worker.start()
+
+        if self.settings.wake_greeting_enabled:
+            # Rocky speaks first (official conversation app pattern). Fire-and-forget on
+            # the conversation loop; a failed greeting must never block startup.
+            def _log_greeting(f) -> None:
+                try:
+                    res = f.result()
+                    logger.info("wake greeting: %r", (res.reply or "")[:120])
+                except Exception:
+                    logger.exception("wake greeting failed")
+
+            greeting_fut = asyncio.run_coroutine_threadsafe(
+                self.state.loop.handle_wake_greeting(), aio
+            )
+            greeting_fut.add_done_callback(_log_greeting)
         try:
             stop_event.wait()
         finally:
